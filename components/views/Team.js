@@ -443,6 +443,9 @@ export default function Team({ user, can }) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit member</DialogTitle>
+            <DialogDescription>
+              Update member details and permissions.
+            </DialogDescription>
           </DialogHeader>
           {editMember && (
             <div className="space-y-3 py-1">
@@ -547,6 +550,9 @@ export default function Team({ user, can }) {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Member details</DialogTitle>
+            <DialogDescription className="sr-only">
+              View member profile and role details
+            </DialogDescription>
           </DialogHeader>
           {viewMember && (
             <div className="space-y-2.5 text-[13px] py-1">

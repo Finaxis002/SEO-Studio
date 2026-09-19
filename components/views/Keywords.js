@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { toast } from 'sonner'
-import { Search, Plus, Upload, Download, KeyRound, TrendingUp, TrendingDown, Trash2, Sparkles, FileText } from 'lucide-react'
+import { Search, Plus, Upload, Download, KeyRound, TrendingUp, TrendingDown, Trash2, Sparkles, FileText, RefreshCw } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,8 +28,22 @@ export default function Keywords({ navigate, can }) {
   const [selected, setSelected] = useState(null)
   const [confirmDel, setConfirmDel] = useState(null)
   const [nk, setNk] = useState({ keyword: '', volume: '', difficulty: '', position: '' })
+  const [syncingGsc, setSyncingGsc] = useState(false)
 
   const { data: keywords, error, mutate } = useSWR('/api/keywords?q=' + encodeURIComponent(q), fetcher)
+
+  const syncGsc = async () => {
+    setSyncingGsc(true)
+    try {
+      const res = await api.post('/api/keywords/sync-gsc')
+      toast.success(`Search Console synced: ${res.inserted} new, ${res.updated} updated (${res.total} total)`)
+      mutate()
+    } catch (err) {
+      toast.error(err.message || 'Failed to sync with Search Console')
+    } finally {
+      setSyncingGsc(false)
+    }
+  }
 
   const exportCsv = () => {
     if (!keywords?.length) return
@@ -46,6 +60,10 @@ export default function Keywords({ navigate, can }) {
         </div>
         {can('seo.keywords') && (
           <div className="flex gap-2">
+            <Button variant="outline" onClick={syncGsc} disabled={syncingGsc}>
+              <RefreshCw className={`h-4 w-4 mr-1.5 ${syncingGsc ? 'animate-spin' : ''}`} />
+              {syncingGsc ? 'Syncing…' : 'Sync Search Console'}
+            </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)}><Upload className="h-4 w-4 mr-1.5" />Import CSV</Button>
             <Button variant="outline" onClick={exportCsv}><Download className="h-4 w-4 mr-1.5" />Export CSV</Button>
             <Button className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/25" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1.5" />Add Keyword</Button>
