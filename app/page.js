@@ -252,7 +252,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background overflow-x-hidden">
+    <div className="flex min-h-screen bg-background overflow-x-clip">
       {/* Desktop sidebar */}
       <aside
         className="hidden lg:block sticky top-0 h-screen shrink-0 z-40"

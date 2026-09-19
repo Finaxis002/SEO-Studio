@@ -98,7 +98,7 @@ export default function Roles({ can }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4 items-start">
         {/* Role list */}
-        <div className="space-y-2">
+        <div className="space-y-2 lg:sticky lg:top-20">
           {!roles
             ? Array.from({ length: 7 }).map((_, i) => (
                 <Skeleton key={i} className="h-14 w-full rounded-xl" />
@@ -141,10 +141,10 @@ export default function Roles({ can }) {
         </div>
 
         {/* Matrix */}
-        <Card className="overflow-hidden">
+        <Card className="overflow-hidden lg:h-[calc(100vh-7rem)] lg:overflow-y-auto">
           {selected && (
             <>
-              <div className="border-b border-border p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+              <div className="sticky top-0 z-10 border-b border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="font-bold">{selected.name}</h2>
