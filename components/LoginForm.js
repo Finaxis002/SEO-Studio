@@ -16,13 +16,27 @@ export default function LoginForm({ onSuccess }) {
   async function submit(event) {
     event.preventDefault();
     setError("");
+
+    if (!email.trim()) {
+      setError("Please enter your email address.");
+      return;
+    }
+    if (!password) {
+      setError("Please enter your password.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Login failed");
@@ -86,7 +100,7 @@ export default function LoginForm({ onSuccess }) {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="login-password">Password</Label>
-               
+                  <span className="text-xs text-muted-foreground">Min. 8 characters</span>
                 </div>
                 <div className="relative">
                   <LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -95,8 +109,12 @@ export default function LoginForm({ onSuccess }) {
                     type={showPassword ? "text" : "password"}
                     autoComplete="current-password"
                     required
+                    minLength={8}
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) => {
+                      setPassword(event.target.value);
+                      if (error) setError("");
+                    }}
                     className="pl-9 pr-10 h-11 bg-gray-50/50 border-gray-200 focus:ring-violet-600"
                     placeholder="Enter your password"
                   />

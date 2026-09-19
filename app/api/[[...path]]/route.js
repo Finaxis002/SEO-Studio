@@ -5,8 +5,11 @@ import path from "path";
 import { getDb, clean } from "../../../lib/db";
 import { ensureSeeded } from "../../../lib/seed";
 import { analyzeSeo, slugify } from "../../../lib/seo";
-import { generateOutline } from "../../../lib/gemini";
-import { getGoogleAnalytics } from "../../../lib/google-analytics";
+import { generateOutline, generateSeoMeta } from "../../../lib/gemini";
+import {
+  getGoogleAnalytics,
+  getSearchConsoleKeywords,
+} from "../../../lib/google-analytics";
 import { deleteAsset, uploadBuffer } from "../../../lib/cloudinary";
 import {
   clearSessionCookie,
@@ -355,19 +358,73 @@ async function handleRoute(request, { params }) {
         .trim()
         .toLowerCase();
       const password = String(body.password || "");
-      const member = await db.collection("team").findOne({ email });
-      if (
-        !member ||
-        member.status !== "active" ||
-        !verifyPassword(password, member.passwordHash)
-      ) {
+
+      if (!email) {
         return handleCORS(
           NextResponse.json(
-            { error: "Invalid email or password" },
+            { error: "Please enter your email address." },
+            { status: 400 },
+          ),
+        );
+      }
+
+      if (!password) {
+        return handleCORS(
+          NextResponse.json(
+            { error: "Please enter your password." },
+            { status: 400 },
+          ),
+        );
+      }
+
+      if (password.length < 8) {
+        return handleCORS(
+          NextResponse.json(
+            { error: "Password must be at least 8 characters long." },
+            { status: 400 },
+          ),
+        );
+      }
+
+      const member = await db.collection("team").findOne({ email });
+
+      if (!member) {
+        return handleCORS(
+          NextResponse.json(
+            {
+              error: `No account found with email "${email}". Please check the email address.`,
+            },
+            { status: 404 },
+          ),
+        );
+      }
+
+      if (member.status !== "active") {
+        return handleCORS(
+          NextResponse.json(
+            {
+              error:
+                "This account has been deactivated. Please contact an administrator.",
+            },
+            { status: 403 },
+          ),
+        );
+      }
+
+      const valid = verifyPassword(password, member.passwordHash);
+
+      if (!valid) {
+        return handleCORS(
+          NextResponse.json(
+            {
+              error:
+                "Incorrect password. Please verify your password and try again.",
+            },
             { status: 401 },
           ),
         );
       }
+
       const response = NextResponse.json({
         user: clean({
           id: member.id,
@@ -383,9 +440,14 @@ async function handleRoute(request, { params }) {
       );
       return handleCORS(response);
     } catch (error) {
+      console.error("Login error:", error);
       return handleCORS(
         NextResponse.json(
-          { error: error.message || "Login failed" },
+          {
+            error:
+              error.message ||
+              "Server error occurred during login. Please try again later.",
+          },
           { status: 500 },
         ),
       );
@@ -405,10 +467,14 @@ async function handleRoute(request, { params }) {
       : null;
     if (!member || member.status !== "active")
       return handleCORS(
-        NextResponse.json({ error: "Not authenticated" }, { status: 401 }),
+        NextResponse.json(
+          { user: null, authenticated: false },
+          { status: 200 },
+        ),
       );
     return handleCORS(
       NextResponse.json({
+        authenticated: true,
         user: clean({
           id: member.id,
           name: member.name,
@@ -428,6 +494,211 @@ async function handleRoute(request, { params }) {
         time: new Date().toISOString(),
       }),
     );
+  }
+
+  // ---------- PUBLIC BLOG API (For Vinimay Website & Readers) ----------
+  if (route === "/public/categories" && method === "GET") {
+    try {
+      const cats = await db
+        .collection("blogs")
+        .aggregate([
+          {
+            $match: {
+              status: "published",
+              category: { $exists: true, $ne: "" },
+            },
+          },
+          { $group: { _id: "$category", count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+        ])
+        .toArray();
+      return handleCORS(
+        NextResponse.json({
+          categories: cats.map((c) => ({ name: c._id, count: c.count })),
+        }),
+      );
+    } catch (e) {
+      console.error("Public categories error:", e);
+      return handleCORS(
+        NextResponse.json(
+          { error: "Failed to fetch categories" },
+          { status: 500 },
+        ),
+      );
+    }
+  }
+
+  if (route === "/public/blogs" && method === "GET") {
+    try {
+      const sp = new URL(request.url).searchParams;
+      const q = sp.get("q") || "";
+      const category = sp.get("category") || "";
+      const tag = sp.get("tag") || "";
+      const page = Math.max(parseInt(sp.get("page") || "1", 10), 1);
+      const limit = Math.min(
+        Math.max(parseInt(sp.get("limit") || "9", 10), 1),
+        50,
+      );
+
+      const filter = { status: "published" };
+      if (q) {
+        filter.$or = [
+          { title: { $regex: esc(q), $options: "i" } },
+          { excerpt: { $regex: esc(q), $options: "i" } },
+          { tags: { $in: [new RegExp(esc(q), "i")] } },
+        ];
+      }
+      if (category && category !== "all" && category !== "All") {
+        filter.category = {
+          $regex: new RegExp("^" + esc(category) + "$", "i"),
+        };
+      }
+      if (tag) {
+        filter.tags = { $in: [new RegExp("^" + esc(tag) + "$", "i")] };
+      }
+
+      const total = await db.collection("blogs").countDocuments(filter);
+      const rawItems = await db
+        .collection("blogs")
+        .find(filter)
+        .sort({ publishedAt: -1, updatedAt: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .toArray();
+
+      const items = rawItems.map((b) => {
+        const cleaned = clean(b);
+        const words =
+          cleaned.wordCount ||
+          (cleaned.contentHtml ? cleaned.contentHtml.split(/\s+/).length : 400);
+        return {
+          id: cleaned.id,
+          title: cleaned.title,
+          slug: cleaned.slug,
+          excerpt: cleaned.excerpt || "",
+          category: cleaned.category || "General",
+          subcategory: cleaned.subcategory || "",
+          tags: cleaned.tags || [],
+          author: cleaned.author || "Vinimay Editorial Team",
+          featuredImage: cleaned.featuredImage || { url: "", alt: "" },
+          publishedAt: cleaned.publishedAt || cleaned.createdAt,
+          updatedAt: cleaned.updatedAt || cleaned.createdAt,
+          wordCount: words,
+          readingTime: Math.max(1, Math.ceil(words / 200)) + " min read",
+        };
+      });
+
+      const categoriesAgg = await db
+        .collection("blogs")
+        .aggregate([
+          {
+            $match: {
+              status: "published",
+              category: { $exists: true, $ne: "" },
+            },
+          },
+          { $group: { _id: "$category", count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+        ])
+        .toArray();
+
+      return handleCORS(
+        NextResponse.json({
+          items,
+          total,
+          page,
+          pages: Math.ceil(total / limit) || 1,
+          categories: categoriesAgg.map((c) => ({
+            name: c._id,
+            count: c.count,
+          })),
+        }),
+      );
+    } catch (e) {
+      console.error("Public blogs error:", e);
+      return handleCORS(
+        NextResponse.json({ error: "Failed to fetch blogs" }, { status: 500 }),
+      );
+    }
+  }
+
+  if (
+    path[0] === "public" &&
+    path[1] === "blogs" &&
+    path[2] &&
+    method === "GET"
+  ) {
+    try {
+      const slugOrId = decodeURIComponent(path[2]);
+      const blog = await db.collection("blogs").findOne({
+        status: "published",
+        $or: [{ slug: slugOrId }, { id: slugOrId }],
+      });
+
+      if (!blog) {
+        return handleCORS(
+          NextResponse.json({ error: "Article not found" }, { status: 404 }),
+        );
+      }
+
+      // Increment view count asynchronously
+      db.collection("blogs")
+        .updateOne({ id: blog.id }, { $inc: { "analytics.views": 1 } })
+        .catch((err) => console.error("Error incrementing view count:", err));
+
+      // Fetch related published articles
+      const relatedRaw = await db
+        .collection("blogs")
+        .find({
+          status: "published",
+          id: { $ne: blog.id },
+          ...(blog.category ? { category: blog.category } : {}),
+        })
+        .sort({ publishedAt: -1, updatedAt: -1 })
+        .limit(3)
+        .toArray();
+
+      const related = relatedRaw.map((r) => {
+        const cleaned = clean(r);
+        const words = cleaned.wordCount || 400;
+        return {
+          id: cleaned.id,
+          title: cleaned.title,
+          slug: cleaned.slug,
+          excerpt: cleaned.excerpt || "",
+          category: cleaned.category || "General",
+          featuredImage: cleaned.featuredImage || { url: "", alt: "" },
+          publishedAt: cleaned.publishedAt || cleaned.createdAt,
+          readingTime: Math.max(1, Math.ceil(words / 200)) + " min read",
+        };
+      });
+
+      const cleanedBlog = clean(blog);
+      const words =
+        cleanedBlog.wordCount ||
+        (cleanedBlog.contentHtml
+          ? cleanedBlog.contentHtml.split(/\s+/).length
+          : 500);
+
+      return handleCORS(
+        NextResponse.json({
+          blog: {
+            ...cleanedBlog,
+            wordCount: words,
+            readingTime: Math.max(1, Math.ceil(words / 200)) + " min read",
+          },
+          related,
+        }),
+      );
+    } catch (e) {
+      console.error("Public blog detail error:", e);
+      return handleCORS(
+        NextResponse.json(
+          { error: "Failed to fetch blog post" },
+          { status: 500 },
+        ),
+      );
+    }
   }
 
   try {
@@ -822,18 +1093,24 @@ async function handleRoute(request, { params }) {
           ),
         );
       if (to === "published" && publishing.checklistEnabled) {
-        const checklist = [
-          blog.seo?.metaTitle,
-          blog.seo?.metaDescription,
-          blog.seo?.focusKeyword,
-          blog.featuredImage?.url,
-          blog.featuredImage?.alt,
-          /<h1[\s>]/i.test(blog.contentHtml || ""),
-        ];
-        if (checklist.some((item) => !item))
+        const missing = [];
+        if (!(blog.seo?.metaTitle || blog.title)) missing.push("Title / SEO title");
+        if ((blog.seo?.metaDescription || "").length < 120)
+          missing.push("Meta description (minimum 120 characters)");
+        if (!blog.seo?.focusKeyword) missing.push("Focus keyword");
+        if (!blog.featuredImage?.url) missing.push("Featured image");
+        if (!(blog.featuredImage?.alt || "").trim()) missing.push("Featured image alt text");
+        if (!blog.author) missing.push("Author");
+        if (!blog.category) missing.push("Category");
+
+        if (missing.length > 0)
           return handleCORS(
             NextResponse.json(
-              { error: "Complete the publish checklist before publishing." },
+              {
+                error:
+                  "Please complete the publish checklist before publishing: " +
+                  missing.join(", "),
+              },
               { status: 400 },
             ),
           );
@@ -1262,6 +1539,102 @@ async function handleRoute(request, { params }) {
         docs.length + " keywords via CSV",
       );
       return handleCORS(NextResponse.json({ imported: docs.length }));
+    }
+
+    if (route === "/keywords/sync-gsc" && method === "POST") {
+      if (!can("seo.keywords"))
+        return forbidden("Your role cannot manage keywords.");
+      try {
+        const gscKeywords = await getSearchConsoleKeywords(90);
+        let inserted = 0;
+        let updated = 0;
+        for (const item of gscKeywords) {
+          if (!item.keyword) continue;
+          const existing = await db.collection("keywords").findOne({
+            keyword: { $regex: new RegExp("^" + esc(item.keyword) + "$", "i") },
+          });
+          if (existing) {
+            await db.collection("keywords").updateOne(
+              { id: existing.id },
+              {
+                $set: {
+                  position: item.position,
+                  clicks: item.clicks,
+                  impressions: item.impressions,
+                  ctr: item.ctr,
+                  source: "google_search_console",
+                  status:
+                    item.position <= 3
+                      ? "top3"
+                      : item.position <= 10
+                        ? "improving"
+                        : "needs-attention",
+                  updatedAt: new Date().toISOString(),
+                },
+              },
+            );
+            updated++;
+          } else {
+            const doc = {
+              id: uuidv4(),
+              keyword: item.keyword,
+              volume: null,
+              difficulty: null,
+              position: item.position,
+              previousPosition: item.position,
+              clicks: item.clicks,
+              impressions: item.impressions,
+              ctr: item.ctr,
+              trend: [item.position],
+              history: [
+                { month: new Date().getMonth(), position: item.position },
+              ],
+              targetUrl: "",
+              targetBlog: "",
+              status:
+                item.position <= 3
+                  ? "top3"
+                  : item.position <= 10
+                    ? "improving"
+                    : "needs-attention",
+              country: "India",
+              intent: "Commercial",
+              serpFeatures: ["Sitelinks"],
+              related: [
+                item.keyword + " online",
+                item.keyword + " portal",
+                item.keyword + " login",
+              ],
+              source: "google_search_console",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            await db.collection("keywords").insertOne(doc);
+            inserted++;
+          }
+        }
+        await recordActivity(
+          "synced",
+          "keywords",
+          `${inserted} new, ${updated} updated from Google Search Console`,
+        );
+        return handleCORS(
+          NextResponse.json({
+            ok: true,
+            inserted,
+            updated,
+            total: gscKeywords.length,
+          }),
+        );
+      } catch (error) {
+        console.error("GSC sync failed:", error);
+        return handleCORS(
+          NextResponse.json(
+            { error: error.message || "Failed to sync with Search Console" },
+            { status: 500 },
+          ),
+        );
+      }
     }
 
     if (path[0] === "keywords" && path[1] && path.length === 2) {
@@ -1948,6 +2321,23 @@ async function handleRoute(request, { params }) {
         return handleCORS(
           NextResponse.json(
             { error: error.message || "Outline generation failed" },
+            { status: error.message?.includes("not configured") ? 503 : 502 },
+          ),
+        );
+      }
+    }
+
+    // ---------- SEO META GENERATOR (GEMINI) ----------
+    if (route === "/generate-seo-meta" && method === "POST") {
+      const body = await request.json();
+      try {
+        const result = await generateSeoMeta(body);
+        return handleCORS(NextResponse.json(result));
+      } catch (error) {
+        console.error("Gemini SEO meta error:", error);
+        return handleCORS(
+          NextResponse.json(
+            { error: error.message || "SEO metadata generation failed" },
             { status: error.message?.includes("not configured") ? 503 : 502 },
           ),
         );

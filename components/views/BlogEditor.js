@@ -228,6 +228,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const [dismissed, setDismissed] = useState([]);
   const [outline, setOutline] = useState(null);
   const [outlineLoading, setOutlineLoading] = useState(false);
+  const [generatingMeta, setGeneratingMeta] = useState(false);
   const [imgBar, setImgBar] = useState(null); // selected img element info
   const [highlight, setHighlight] = useState(null);
   const [seoSheetOpen, setSeoSheetOpen] = useState(false);
@@ -688,67 +689,134 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     () => [
       {
         label: "Title",
-        ok: !!form.title.trim(),
-        fix: () => document.getElementById("f-title")?.focus(),
+        ok: !!(form.title || "").trim(),
+        fix: () => {
+          setChecklistOpen(false);
+          setTimeout(() => {
+            const el = document.getElementById("f-title");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            el?.focus();
+          }, 120);
+        },
       },
       {
         label: "Content (150+ words)",
-        ok: wc >= 150,
-        fix: () => editorRef.current?.focus(),
+        ok: (wc || 0) >= 150,
+        fix: () => {
+          setChecklistOpen(false);
+          setTimeout(() => {
+            editorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+            editorRef.current?.focus();
+          }, 120);
+        },
       },
       {
         label: "Featured image",
-        ok: !!form.featuredImage.url,
+        ok: !!form.featuredImage?.url,
         fix: () => {
-          setTab("seo");
-          setTimeout(
-            () =>
-              document
-                .getElementById("featured-card")
-                ?.scrollIntoView({ behavior: "smooth" }),
-            100,
-          );
+          setChecklistOpen(false);
+          setTimeout(() => {
+            document
+              .getElementById("featured-card")
+              ?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }, 120);
         },
       },
       {
         label: "SEO title",
-        ok: !!(form.seo.metaTitle || form.title),
-        fix: () => setTab("meta"),
+        ok: !!(form.seo?.metaTitle || form.title || "").trim(),
+        fix: () => {
+          setChecklistOpen(false);
+          setTab("meta");
+          setSeoSheetOpen(true);
+          setTimeout(() => {
+            const el = document.getElementById("f-seo-title");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            el?.focus();
+          }, 150);
+        },
       },
       {
         label: "Meta description",
-        ok: (form.seo.metaDescription || "").length >= 120,
-        fix: () => setTab("meta"),
+        ok: (form.seo?.metaDescription || "").length >= 120,
+        fix: () => {
+          setChecklistOpen(false);
+          setTab("meta");
+          setSeoSheetOpen(true);
+          setTimeout(() => {
+            const el = document.getElementById("f-meta-description");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            el?.focus();
+          }, 150);
+        },
       },
-      { label: "URL slug", ok: !!form.slug, fix: () => setTab("meta") },
+      {
+        label: "URL slug",
+        ok: !!(form.slug || "").trim(),
+        fix: () => {
+          setChecklistOpen(false);
+          setTimeout(() => {
+            const el = document.getElementById("f-slug");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            el?.focus();
+          }, 120);
+        },
+      },
       {
         label: "Focus keyword",
-        ok: !!form.seo.focusKeyword,
-        fix: () => setTab("seo"),
+        ok: !!(form.seo?.focusKeyword || "").trim(),
+        fix: () => {
+          setChecklistOpen(false);
+          setTab("seo");
+          setSeoSheetOpen(true);
+          setTimeout(() => {
+            const el = document.getElementById("f-focus-keyword");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            el?.focus();
+          }, 150);
+        },
       },
       {
         label: "Featured image alt text",
-        ok: !!(form.featuredImage.alt || "").trim(),
+        ok: !!(form.featuredImage?.alt || "").trim(),
         fix: () => {
-          setTab("seo");
-          setTimeout(
-            () =>
+          setChecklistOpen(false);
+          setTimeout(() => {
+            const el = document.getElementById("f-featured-alt");
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+              el.focus();
+            } else {
               document
                 .getElementById("featured-card")
-                ?.scrollIntoView({ behavior: "smooth" }),
-            100,
-          );
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }, 120);
         },
       },
       {
         label: "Author",
         ok: !!form.author,
-        fix: () => document.getElementById("f-author")?.focus(),
+        fix: () => {
+          setChecklistOpen(false);
+          setTimeout(() => {
+            const el = document.getElementById("f-author");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            el?.focus();
+          }, 120);
+        },
       },
       {
         label: "Category",
         ok: !!form.category,
-        fix: () => document.getElementById("f-category")?.focus(),
+        fix: () => {
+          setChecklistOpen(false);
+          setTimeout(() => {
+            const el = document.getElementById("f-category");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            el?.focus();
+          }, 120);
+        },
       },
     ],
     [form, wc],
@@ -804,6 +872,45 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         .join("");
     insertHTML(html);
     toast.success("Structure applied to the editor");
+  }
+
+  async function generateSeoMetaWithAi() {
+    if (!form.title && !form.seo.focusKeyword && !form.contentHtml) {
+      toast.error("Please provide a title, focus keyword, or content first.");
+      return;
+    }
+    setGeneratingMeta(true);
+    try {
+      const res = await api("/generate-seo-meta", {
+        method: "POST",
+        body: {
+          title: form.title,
+          keyword: form.seo.focusKeyword || form.brief.targetKeyword,
+          contentHtml: form.contentHtml,
+        },
+      });
+      if (res.metaTitle || res.metaDescription) {
+        upSeo({
+          metaTitle: res.metaTitle || form.seo.metaTitle,
+          metaDescription: res.metaDescription || form.seo.metaDescription,
+          secondaryKeywords: Array.from(
+            new Set([
+              ...(form.seo.secondaryKeywords || []),
+              ...(res.suggestedKeywords || []),
+            ]),
+          ),
+          ogTitle: res.metaTitle || form.seo.ogTitle,
+          ogDescription: res.metaDescription || form.seo.ogDescription,
+          twitterTitle: res.metaTitle || form.seo.twitterTitle,
+          twitterDescription: res.metaDescription || form.seo.twitterDescription,
+        });
+        toast.success("SEO Metadata generated with Gemini AI!");
+      }
+    } catch (e) {
+      toast.error(e.message || "Could not generate SEO metadata");
+    } finally {
+      setGeneratingMeta(false);
+    }
   }
 
   const ToolBtn = ({ onClick, active, title, children, disabled }) => (
@@ -895,6 +1002,8 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
       outlineLoading={outlineLoading}
       generateOutline={generateOutline}
       applyOutline={applyOutline}
+      generatingMeta={generatingMeta}
+      generateSeoMetaWithAi={generateSeoMetaWithAi}
       highlight={highlight}
       setImgDialog={openPicker}
     />
@@ -1071,6 +1180,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                       /blog/
                     </span>
                     <Input
+                      id="f-slug"
                       value={form.slug}
                       onChange={(e) =>
                         up({ slug: slugify(e.target.value), slugEdited: true })
@@ -1082,7 +1192,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 </Labeled>
                 <Labeled label="Author" required>
                   <Select
-                    value={form.author || undefined}
+                    value={form.author || ""}
                     onValueChange={(v) => up({ author: v })}
                   >
                     <SelectTrigger id="f-author" className="bg-muted/30">
@@ -1101,7 +1211,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 </Labeled>
                 <Labeled label="Category" required>
                   <Select
-                    value={form.category || undefined}
+                    value={form.category || ""}
                     onValueChange={(v) => up({ category: v })}
                   >
                     <SelectTrigger id="f-category" className="bg-muted/30">
@@ -1118,7 +1228,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 </Labeled>
                 <Labeled label="Subcategory">
                   <Select
-                    value={form.subcategory || undefined}
+                    value={form.subcategory || ""}
                     onValueChange={(v) => up({ subcategory: v })}
                   >
                     <SelectTrigger className="bg-muted/30">
@@ -1832,6 +1942,7 @@ function FeaturedMeta({ form, up, optimizeFeatured, setImgDialog }) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Labeled label="Alt text" required>
           <Input
+            id="f-featured-alt"
             value={fi.alt}
             onChange={(e) =>
               up({ featuredImage: { ...fi, alt: e.target.value } })
@@ -1907,6 +2018,8 @@ function EditorRail({
   outlineLoading,
   generateOutline,
   applyOutline,
+  generatingMeta,
+  generateSeoMetaWithAi,
   highlight,
   setImgDialog,
 }) {
@@ -2009,6 +2122,7 @@ function EditorRail({
           <Separator />
           <Labeled label="Focus keyword" required hint="primary target">
             <Input
+              id="f-focus-keyword"
               value={form.seo.focusKeyword}
               onChange={(e) => upSeo({ focusKeyword: e.target.value })}
               placeholder="Enter target keyword"
@@ -2052,6 +2166,30 @@ function EditorRail({
       {/* META TAB */}
       {tab === "meta" && (
         <CardContent className="p-4 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-border/70">
+            <div>
+              <p className="text-[12.5px] font-semibold text-foreground">
+                Search Engine Meta
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                High-CTR titles & descriptions
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={generatingMeta}
+              onClick={generateSeoMetaWithAi}
+              className="h-8 text-xs gap-1.5 border-violet-200 bg-violet-50/60 hover:bg-violet-100 text-violet-700 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300"
+            >
+              <Sparkles
+                className={`h-3.5 w-3.5 ${generatingMeta ? "animate-spin" : ""}`}
+              />
+              {generatingMeta ? "Generating…" : "Generate with AI"}
+            </Button>
+          </div>
+
           <Labeled
             label="SEO title"
             hint={
@@ -2063,6 +2201,7 @@ function EditorRail({
             }
           >
             <Input
+              id="f-seo-title"
               value={form.seo.metaTitle}
               onChange={(e) => upSeo({ metaTitle: e.target.value })}
               placeholder={
@@ -2078,6 +2217,7 @@ function EditorRail({
             }
           >
             <Textarea
+              id="f-meta-description"
               value={form.seo.metaDescription}
               onChange={(e) => upSeo({ metaDescription: e.target.value })}
               placeholder="Your meta description appears here in Google results…"
@@ -2389,7 +2529,7 @@ function EditorRail({
           <div className="grid grid-cols-2 gap-3">
             <Labeled label="Search intent">
               <Select
-                value={form.brief.intent}
+                value={form.brief?.intent || "Informational"}
                 onValueChange={(v) =>
                   up({ brief: { ...form.brief, intent: v } })
                 }
@@ -2413,7 +2553,7 @@ function EditorRail({
             </Labeled>
             <Labeled label="Content type">
               <Select
-                value={form.brief.contentType}
+                value={form.brief?.contentType || "Guide"}
                 onValueChange={(v) =>
                   up({ brief: { ...form.brief, contentType: v } })
                 }
@@ -2842,10 +2982,15 @@ function PreviewModal({ open, onOpenChange, form, analysis }) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[960px] h-[86vh] p-0 flex flex-col">
         <DialogHeader className="px-5 pt-4 pb-3 border-b border-border flex-row items-center justify-between space-y-0">
-          <DialogTitle className="text-base flex items-center gap-2">
-            <Eye className="h-4 w-4 text-violet-500" />
-            Preview — {form.title || "Untitled"}
-          </DialogTitle>
+          <div>
+            <DialogTitle className="text-base flex items-center gap-2">
+              <Eye className="h-4 w-4 text-violet-500" />
+              Preview — {form.title || "Untitled"}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Preview of the blog article
+            </DialogDescription>
+          </div>
           <div className="flex items-center gap-2">
             <Tabs value={ptab} onValueChange={setPtab}>
               <TabsList className="h-8">

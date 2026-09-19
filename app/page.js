@@ -11,7 +11,7 @@ import {
   Menu,
   Loader2,
 } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -68,13 +68,9 @@ export default function App() {
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
-      .then((response) =>
-        response.ok
-          ? response.json()
-          : Promise.reject(new Error("Not authenticated")),
-      )
+      .then((response) => (response.ok ? response.json() : { user: null }))
       .then((data) => {
-        setUser(data.user);
+        setUser(data.user || null);
       })
       .catch(() => setUser(null))
       .finally(() => setAuthLoading(false));
@@ -451,6 +447,10 @@ function SearchDialog({ open, onOpenChange, q, setQ, navigate }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg p-0 overflow-hidden">
+        <DialogTitle className="sr-only">Quick search</DialogTitle>
+        <DialogDescription className="sr-only">
+          Search across blogs, keywords, media, and people
+        </DialogDescription>
         <div className="flex items-center gap-2 border-b border-border px-4">
           <Search className="h-4 w-4 text-muted-foreground" />
           <Input
