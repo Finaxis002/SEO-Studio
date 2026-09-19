@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Search,
   Bell,
@@ -81,8 +81,16 @@ export default function Header({
 }) {
   const { theme, setTheme } = useTheme();
   const [helpOpen, setHelpOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const [isMac, setIsMac] = useState(false);
   const unread = notifications.filter((n) => !n.read).length;
+
+  useEffect(() => {
+    setIsMac(/Mac|iPhone|iPad/.test(navigator.platform));
+  }, []);
+
+  const searchShortcut = isMac ? "⌘K" : "Ctrl+Shift+K";
+  const createShortcut = isMac ? "⌘N" : "Ctrl+Shift+N";
+  const themeShortcut = isMac ? "⌘J" : "Ctrl+J";
 
   return (
     <header className="sticky top-0 z-30 flex items-center gap-3 h-16 px-4 lg:px-6 border-b border-border bg-background/80 backdrop-blur-xl">
@@ -110,7 +118,7 @@ export default function Header({
         <span className="flex-1 text-left truncate">
           Search blogs, keywords, media…
         </span>
-        <span className="ss-kbd">⌘K</span>
+        <span className="ss-kbd">{searchShortcut}</span>
       </button>
       <Button
         variant="ghost"
@@ -136,15 +144,15 @@ export default function Header({
           <div className="space-y-2 text-[13px]">
             <div className="flex items-center justify-between">
               <span>Global search</span>
-              <span className="ss-kbd">⌘K</span>
+              <span className="ss-kbd">{searchShortcut}</span>
             </div>
             <div className="flex items-center justify-between">
               <span>Create new blog</span>
-              <span className="ss-kbd">⌘N</span>
+              <span className="ss-kbd">{createShortcut}</span>
             </div>
             <div className="flex items-center justify-between">
               <span>Toggle theme</span>
-              <span className="ss-kbd">⌘J</span>
+              <span className="ss-kbd">{themeShortcut}</span>
             </div>
           </div>
         </PopoverContent>
