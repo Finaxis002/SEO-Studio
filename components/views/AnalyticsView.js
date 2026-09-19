@@ -40,16 +40,16 @@ export default function AnalyticsView({ initialTab }) {
   const [tab, setTab] = useState(initialTab || "overview");
   const { data, error } = useSWR("/api/analytics?range=" + range, fetcher);
 
-  if (error)
+  if (error || data?.error)
     return (
       <EmptyState
         icon={BarChart3}
         title="Something went wrong"
-        description="Unable to load analytics."
+        description={data?.error || "Unable to load analytics."}
         onRetry={() => location.reload()}
       />
     );
-  if (!data)
+  if (!data || !data.totals)
     return (
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {Array.from({ length: 8 }).map((_, i) => (
@@ -58,8 +58,8 @@ export default function AnalyticsView({ initialTab }) {
       </div>
     );
 
-  const t = data.totals,
-    d = data.deltas;
+  const t = data.totals || {},
+    d = data.deltas || {};
   const cards = [
     {
       label: "Organic Traffic",

@@ -42,13 +42,6 @@ function esc(s) {
   return (s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const DEFAULT_USER = {
-  id: "u1",
-  name: "Ayushi Sharma",
-  email: "ayushi@seostudio.io",
-  role: "Super Admin",
-};
-
 async function getUser(request, db) {
   const uid = getSessionUserId(request);
   if (uid) {
@@ -285,6 +278,57 @@ async function publishingSettings(db) {
   );
 }
 
+async function checkAndPublishScheduled(db) {
+  try {
+    const settings = await publishingSettings(db);
+    if (settings.publishing?.autoPublishScheduled !== false) {
+      const now = new Date().toISOString();
+      const scheduledBlogs = await db
+        .collection("blogs")
+        .find({
+          status: "scheduled",
+          scheduledAt: { $lte: now },
+        })
+        .toArray();
+
+      for (const blog of scheduledBlogs) {
+        await db.collection("blogs").updateOne(
+          { id: blog.id },
+          {
+            $set: {
+              status: "published",
+              publishedAt: now,
+              updatedAt: now,
+            },
+          },
+        );
+        await notify(
+          db,
+          "publish",
+          "Scheduled blog auto-published",
+          `"${blog.title}" has reached its scheduled time and is now live.`,
+        );
+        await db.collection("activity").insertOne({
+          id: uuidv4(),
+          user: "System Scheduler",
+          userId: "system",
+          userRole: "Super Admin",
+          action: "published",
+          resourceType: "blog",
+          resource: blog.title,
+          details: "Auto-published at scheduled time",
+          status: "success",
+          ip: "127.0.0.1",
+          device: "Server Process",
+          createdAt: now,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Scheduled publishing check error:", err);
+  }
+}
+
 async function handleRoute(request, { params }) {
   const { path = [] } = await params;
   const route = "/" + path.join("/");
@@ -293,6 +337,7 @@ async function handleRoute(request, { params }) {
   try {
     db = await getDb();
     await ensureSeeded(db);
+    await checkAndPublishScheduled(db);
   } catch (e) {
     console.error("DB connection error:", e);
     return handleCORS(
@@ -492,12 +537,9 @@ async function handleRoute(request, { params }) {
             ),
           );
         } catch (error) {
-          console.error("Google stats error:", error);
-          return handleCORS(
-            NextResponse.json(
-              { error: error.message || "Google analytics request failed" },
-              { status: 502 },
-            ),
+          console.warn(
+            "Google stats live call failed, falling back to database stats:",
+            error.message,
           );
         }
       }
@@ -1119,35 +1161,43 @@ async function handleRoute(request, { params }) {
           NextResponse.json({ error: "Keyword is required" }, { status: 400 }),
         );
       const vol =
-        parseInt(body.volume || "0", 10) ||
-        Math.max(300, (kw.length * 137) % 9000);
+        body.volume !== undefined && body.volume !== "" && body.volume !== null
+          ? parseInt(body.volume, 10)
+          : null;
       const diff =
-        parseInt(body.difficulty || "0", 10) ||
-        Math.max(15, (kw.length * 53) % 90);
+        body.difficulty !== undefined &&
+        body.difficulty !== "" &&
+        body.difficulty !== null
+          ? parseInt(body.difficulty, 10)
+          : null;
       const pos =
-        parseInt(body.position || "0", 10) ||
-        Math.max(3, (kw.length * 29) % 40);
+        body.position !== undefined &&
+        body.position !== "" &&
+        body.position !== null
+          ? parseInt(body.position, 10)
+          : null;
       const doc = {
         id: uuidv4(),
         keyword: kw,
         volume: vol,
         difficulty: diff,
         position: pos,
-        previousPosition: pos + 1,
-        trend: Array.from({ length: 10 }, (_, j) =>
-          Math.max(1, Math.round(pos + Math.sin(j / 2) * 2)),
-        ),
-        history: Array.from({ length: 12 }, (_, j) => ({
-          month: j,
-          position: Math.max(1, pos + Math.round(Math.sin(j) * 2) + 2),
-        })),
+        previousPosition: pos,
+        trend: pos ? [pos] : [],
+        history: pos ? [{ month: new Date().getMonth(), position: pos }] : [],
         targetUrl: body.targetUrl || "",
         targetBlog: body.targetBlog || "",
-        status: pos <= 3 ? "top3" : pos <= 10 ? "improving" : "needs-attention",
+        status: !pos
+          ? "needs-attention"
+          : pos <= 3
+            ? "top3"
+            : pos <= 10
+              ? "improving"
+              : "needs-attention",
         country: body.country || "Global",
         intent: body.intent || "Informational",
-        serpFeatures: body.serpFeatures || ["People Also Ask"],
-        related: body.related || [kw + " guide", kw + " tools", "best " + kw],
+        serpFeatures: body.serpFeatures || [],
+        related: body.related || [],
         createdAt: new Date().toISOString(),
       };
       await db.collection("keywords").insertOne(doc);
@@ -1168,27 +1218,36 @@ async function handleRoute(request, { params }) {
         const cols = line.split(",").map((c) => c.trim());
         if (!cols[0] || /^keyword$/i.test(cols[0])) continue;
         const kw = cols[0];
-        const vol = parseInt(cols[1], 10) || 1000;
-        const diff = parseInt(cols[2], 10) || 50;
-        const pos = parseInt(cols[3], 10) || 20;
+        const vol =
+          cols[1] && !isNaN(parseInt(cols[1], 10))
+            ? parseInt(cols[1], 10)
+            : null;
+        const diff =
+          cols[2] && !isNaN(parseInt(cols[2], 10))
+            ? parseInt(cols[2], 10)
+            : null;
+        const pos =
+          cols[3] && !isNaN(parseInt(cols[3], 10))
+            ? parseInt(cols[3], 10)
+            : null;
         docs.push({
           id: uuidv4(),
           keyword: kw,
           volume: vol,
           difficulty: diff,
           position: pos,
-          previousPosition: pos + 1,
-          trend: Array.from({ length: 10 }, (_, j) =>
-            Math.max(1, Math.round(pos + Math.sin(j / 2) * 2)),
-          ),
-          history: Array.from({ length: 12 }, (_, j) => ({
-            month: j,
-            position: Math.max(1, pos + 2),
-          })),
+          previousPosition: pos,
+          trend: pos ? [pos] : [],
+          history: pos ? [{ month: new Date().getMonth(), position: pos }] : [],
           targetUrl: cols[4] || "",
           targetBlog: "",
-          status:
-            pos <= 3 ? "top3" : pos <= 10 ? "improving" : "needs-attention",
+          status: !pos
+            ? "needs-attention"
+            : pos <= 3
+              ? "top3"
+              : pos <= 10
+                ? "improving"
+                : "needs-attention",
           country: "Global",
           intent: "Informational",
           serpFeatures: [],
@@ -1526,12 +1585,9 @@ async function handleRoute(request, { params }) {
             NextResponse.json(clean(await getGoogleAnalytics(n))),
           );
         } catch (error) {
-          console.error("Google analytics error:", error);
-          return handleCORS(
-            NextResponse.json(
-              { error: error.message || "Google analytics request failed" },
-              { status: 502 },
-            ),
+          console.warn(
+            "Google analytics live call failed, falling back to database analytics:",
+            error.message,
           );
         }
       }
@@ -1625,16 +1681,22 @@ async function handleRoute(request, { params }) {
               id: b.id,
               title: b.title,
               slug: b.slug,
-              views: b.analytics.views,
-              organic: b.analytics.organic,
-              ctr: 4.2 + (b.seo.score % 5),
+              views: b.analytics?.views || 0,
+              organic: b.analytics?.organic || 0,
+              ctr: b.analytics?.impressions
+                ? +(
+                    (b.analytics.clicks / b.analytics.impressions) *
+                    100
+                  ).toFixed(1)
+                : 0,
             })),
             topKeywords: kws.map((k) => ({
               keyword: k.keyword,
               position: k.position,
               previousPosition: k.previousPosition,
               volume: k.volume,
-              clicks: Math.round(k.volume * 0.28),
+              clicks:
+                k.clicks !== undefined && k.clicks !== null ? k.clicks : null,
               difficulty: k.difficulty,
             })),
             ctr: totals.impressions

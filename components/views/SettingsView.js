@@ -194,7 +194,8 @@ export default function SettingsView({ tab: initialTab, user }) {
                     Google Search Console verified
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    Property G-SEOSTUDIO1
+                    {form.seo.gscProperty ||
+                      "Connected via Google Service Account"}
                   </p>
                 </div>
                 <Switch
@@ -337,8 +338,8 @@ export default function SettingsView({ tab: initialTab, user }) {
               />
             </div>
             <p className="text-[12px] text-muted-foreground">
-              Use the “View as role…” option in the avatar menu to experience
-              SEO Studio with another team member&apos;s permissions.
+              Role permissions and access rights can be configured under
+              Management &gt; Roles &amp; Permissions.
             </p>
           </CardContent>
         </Card>

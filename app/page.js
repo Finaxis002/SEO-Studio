@@ -98,14 +98,14 @@ export default function App() {
   }, []);
 
   // Permissions
-  const role = roles ? (roles || []).find((r) => r.name === user.role) : null;
+  const role = roles ? (roles || []).find((r) => r.name === user?.role) : null;
   const can = useCallback(
     (perm) => {
-      if (!roles || !role) return true;
+      if (user?.role === "Super Admin") return true;
       if (!roles || !role) return false;
       return (role.permissions || []).includes(perm);
     },
-    [roles, role],
+    [roles, role, user?.role],
   );
 
   // Keyboard shortcuts
@@ -197,6 +197,8 @@ export default function App() {
         return <Blogs statusFilter="draft" navigate={navigate} can={can} />;
       case "scheduled":
         return <Blogs statusFilter="scheduled" navigate={navigate} can={can} />;
+      case "schedule":
+        return <ScheduleView navigate={navigate} can={can} />;
       case "published":
         return <Blogs statusFilter="published" navigate={navigate} can={can} />;
       case "archived":
