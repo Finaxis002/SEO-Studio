@@ -89,7 +89,6 @@ export default function Header({
   }, []);
 
   const searchShortcut = isMac ? "⌘K" : "Ctrl+Shift+K";
-  const createShortcut = isMac ? "⌘N" : "Ctrl+Shift+N";
   const themeShortcut = isMac ? "⌘J" : "Ctrl+J";
 
   return (
@@ -145,10 +144,6 @@ export default function Header({
             <div className="flex items-center justify-between">
               <span>Global search</span>
               <span className="ss-kbd">{searchShortcut}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Create new blog</span>
-              <span className="ss-kbd">{createShortcut}</span>
             </div>
             <div className="flex items-center justify-between">
               <span>Toggle theme</span>
@@ -319,7 +314,6 @@ export default function Header({
           <div className="space-y-3 py-2 text-sm">
             {[
               ["⌘K", "Open global search"],
-              ["⌘N", "Create a new blog"],
               ["⌘J", "Toggle dark mode"],
               ["Esc", "Close dialogs"],
             ].map(([k, d]) => (
