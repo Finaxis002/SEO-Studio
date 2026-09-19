@@ -10,7 +10,6 @@ import {
   Globe,
   Archive,
   Images,
-  Upload,
   Gauge,
   KeyRound,
   Wand2,
@@ -122,14 +121,6 @@ export const NAV = [
         key: "media",
         label: "Media Library",
         icon: Images,
-      },
-      {
-        key: "media",
-        label: "Upload Images",
-        icon: Upload,
-        params: {
-          upload: true,
-        },
       },
     ],
   },
