@@ -6,6 +6,7 @@ import {
   PenLine,
   FileEdit,
   CalendarClock,
+  CalendarDays,
   Globe,
   Archive,
   Images,
@@ -87,6 +88,14 @@ export const NAV = [
           status: "scheduled",
         },
         badge: "scheduled",
+      },
+      {
+        key: "schedule",
+        label: "Publishing Calendar",
+        icon: CalendarDays,
+        view: {
+          name: "schedule",
+        },
       },
       {
         key: "published",
@@ -239,6 +248,16 @@ export const NAV = [
 ]
 
 export function navTitle(view) {
+  if (view.name === "schedule") {
+    return "Publishing Calendar"
+  }
+  if (view.name === "editor") {
+    return view.params?.id || view.id ? "Edit Blog" : "Create New Blog"
+  }
+  if (view.name === "blog") {
+    return "Blog Detail"
+  }
+
   for (const g of NAV) {
     for (const it of g.items) {
       const sameView =
@@ -251,18 +270,10 @@ export function navTitle(view) {
             ([k, v]) => view.params[k] === v
           ))
 
-      if (sameView && sameParams && !it.view) {
+      if (sameView && sameParams) {
         return it.label
       }
     }
-  }
-
-  if (view.name === "editor") {
-    return view.id ? "Edit Blog" : "Create New Blog"
-  }
-
-  if (view.name === "blog") {
-    return "Blog Detail"
   }
 
   return "Dashboard"
