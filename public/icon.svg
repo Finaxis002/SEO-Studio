@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Background Gradient: Premium Violet to Indigo -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8B5CF6"/>
+      <stop offset="45%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#4338CA"/>
+    </linearGradient>
+    
+    <!-- Sparkle Radiant Fill -->
+    <linearGradient id="sparkleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="55%" stop-color="#F5F3FF"/>
+      <stop offset="100%" stop-color="#DDD6FE"/>
+    </linearGradient>
+
+    <!-- Accent Cyan / Sky Glow for Search & Intelligence -->
+    <linearGradient id="cyanAccent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#818CF8"/>
+    </linearGradient>
+    
+    <!-- Top Specular Gloss -->
+    <linearGradient id="glossGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.32"/>
+      <stop offset="40%" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Center Soft Drop Shadow -->
+    <filter id="softShadow" x="-10%" y="-10%" width="125%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#1E1B4B" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle Base with smooth curvature -->
+  <rect x="16" y="16" width="480" height="480" rx="120" fill="url(#bgGrad)"/>
+  
+  <!-- Subtle Inner Border Highlight -->
+  <rect x="16" y="16" width="480" height="480" rx="120" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-opacity="0.22"/>
+
+  <!-- Top Glass Sheen -->
+  <path d="M 16 136 C 16 70 70 16 136 16 L 376 16 C 442 16 496 70 496 136 L 496 220 C 340 265 172 265 16 220 Z" fill="url(#glossGrad)"/>
+
+  <!-- Iconic Center Mark: SEO Studio 4-Point Radiant Star + Dynamic Accents -->
+  <g filter="url(#softShadow)">
+    <!-- Primary Center Star -->
+    <path d="M 256 90 
+             C 256 182, 182 256, 90 256 
+             C 182 256, 256 330, 256 422 
+             C 256 330, 330 256, 422 256 
+             C 330 256, 256 182, 256 90 Z" 
+          fill="url(#sparkleGrad)"/>
+    
+    <!-- Top-Right Accent Sparkle (Cyan to Indigo) -->
+    <path d="M 390 74 
+             C 390 100, 368 118, 348 118 
+             C 368 118, 390 136, 390 162 
+             C 390 136, 412 118, 432 118 
+             C 412 118, 390 100, 390 74 Z" 
+          fill="url(#cyanAccent)"/>
+          
+    <!-- Bottom-Left Accent Sparkle (Emerald Mint) -->
+    <path d="M 124 350 
+             C 124 368, 108 382, 94 382 
+             C 108 382, 124 396, 124 414 
+             C 124 396, 140 382, 154 382 
+             C 140 382, 124 368, 124 350 Z" 
+          fill="#6EE7B7"/>
+
+    <!-- Subtle Center Core Light -->
+    <circle cx="256" cy="256" r="22" fill="#FFFFFF" opacity="0.95"/>
+  </g>
+</svg>
