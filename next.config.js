@@ -26,6 +26,9 @@ const nextConfig = {
     maxInactiveAge: 10000,
     pagesBufferLength: 2,
   },
+  async rewrites() {
+    return [{ source: "/dashboard/:path*", destination: "/" }];
+  },
   async headers() {
     return [
       {
