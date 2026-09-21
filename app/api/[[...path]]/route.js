@@ -2597,9 +2597,12 @@ async function handleRoute(request, { params }) {
     }
 
     if (route === "/categories" && method === "GET") {
-      const cats = await db.collection("blogs").distinct("category");
+      const options = await db.collection("workspace_config").findOne(
+        { id: "default" },
+        { projection: { categories: 1 } },
+      );
       return handleCORS(
-        NextResponse.json({ categories: cats.filter(Boolean) }),
+        NextResponse.json({ categories: options?.categories || [] }),
       );
     }
 
