@@ -42,8 +42,22 @@ import relativeTime from "dayjs/plugin/relativeTime";
 
 dayjs.extend(relativeTime);
 
+function readViewFromLocation() {
+  const segments = window.location.pathname.split("/").filter(Boolean);
+  const params = new URLSearchParams(window.location.search);
+  const name = segments[0] === "dashboard" ? segments[1] || "dashboard" : "dashboard";
+  const viewParams = {};
+  params.forEach((value, key) => {
+    viewParams[key] = value;
+  });
+  return { name, params: viewParams };
+}
+
 export default function App() {
-  const [view, setView] = useState({ name: "dashboard", params: {} });
+  const [view, setView] = useState(() => {
+    if (typeof window === "undefined") return { name: "dashboard", params: {} };
+    return readViewFromLocation();
+  });
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -89,8 +103,27 @@ export default function App() {
   }, [statsMutate, issuesMutate, notifMutate]);
 
   const navigate = useCallback((name, params) => {
-    setView({ name, params: params || {} });
+    const nextParams = params || {};
+    const query = new URLSearchParams();
+    Object.entries(nextParams).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.set(key, String(value));
+      }
+    });
+    const pathname = name === "dashboard" ? "/dashboard" : "/dashboard/" + name;
+    window.history.pushState(
+      { view: name, params: nextParams },
+      "",
+      pathname + (query.toString() ? "?" + query.toString() : ""),
+    );
+    setView({ name, params: nextParams });
     window.scrollTo(0, 0);
+  }, []);
+
+  useEffect(() => {
+    const restoreView = () => setView(readViewFromLocation());
+    window.addEventListener("popstate", restoreView);
+    return () => window.removeEventListener("popstate", restoreView);
   }, []);
 
   // Permissions

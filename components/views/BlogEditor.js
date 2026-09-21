@@ -395,7 +395,11 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         setId(b.id);
         idRef.current = b.id;
         setLastSaved(b.updatedAt);
-        window.history.replaceState(null, "", "?id=" + b.id);
+        window.history.replaceState(
+          null,
+          "",
+          "/dashboard/editor?id=" + encodeURIComponent(b.id),
+        );
         window.dispatchEvent(new Event("ss-refresh"));
         return b.id;
       }

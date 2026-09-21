@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { Search, Plus, MoreHorizontal, Eye, Pencil, Copy, Archive, Trash2, FileText, ChevronDown, RotateCcw, LayoutGrid } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -28,6 +28,11 @@ export default function Blogs({ statusFilter, navigate, can }) {
   const [sort, setSort] = useState('newest')
   const [page, setPage] = useState(1)
   const [confirm, setConfirm] = useState(null)
+
+  useEffect(() => {
+    setStatus(statusFilter || 'all')
+    setPage(1)
+  }, [statusFilter])
 
   const query = useMemo(() => {
     const p = new URLSearchParams()
