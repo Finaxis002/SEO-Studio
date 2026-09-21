@@ -98,11 +98,13 @@ function readPermission(route, method, path) {
   if (route === "/permissions") return "team.view";
   if (route === "/team-options") return "team.view";
   if (route === "/settings-options") return "settings.view";
-  if (route === "/content-options") return "blogs.view";
+  if (route === "/content-options")
+    return ["blogs.view", "blogs.create", "blogs.edit", "settings.edit"];
   if (route === "/activity") return "team.view";
   if (route === "/seo-issues") return "seo.issues.view";
   if (route === "/settings") return "settings.view";
-  if (route === "/categories") return "blogs.view";
+  if (route === "/categories" || route === "/subcategories")
+    return ["blogs.view", "settings.edit"];
   if (route === "/generate-outline") return "blogs.create";
   return null;
 }
@@ -714,7 +716,10 @@ async function handleRoute(request, { params }) {
     const can = (key) => perms.includes("*") || perms.includes(key);
     const recordActivity = (...args) => logActivity(db, user, ...args, request);
     const requiredReadPermission = readPermission(route, method, path);
-    if (requiredReadPermission && !can(requiredReadPermission)) {
+    const hasReadPermission = Array.isArray(requiredReadPermission)
+      ? requiredReadPermission.some(can)
+      : !requiredReadPermission || can(requiredReadPermission);
+    if (!hasReadPermission) {
       return forbidden("Your role cannot access this resource.");
     }
 
@@ -1829,13 +1834,223 @@ async function handleRoute(request, { params }) {
         .collection("workspace_config")
         .findOne(
           { id: "default" },
-          { projection: { categories: 1, subcategories: 1 } },
+          {
+            projection: {
+              categories: 1,
+              subcategories: 1,
+              subcategoryRelations: 1,
+            },
+          },
         );
       return handleCORS(
-        NextResponse.json(
-          clean(options || { categories: [], subcategories: [] }),
-        ),
+        NextResponse.json(clean(options || { categories: [], subcategories: [] })),
       );
+    }
+
+    if (route === "/categories" && method === "GET") {
+      const options = await db.collection("workspace_config").findOne(
+        { id: "default" },
+        { projection: { categories: 1 } },
+      );
+      return handleCORS(
+        NextResponse.json({ categories: options?.categories || [] }),
+      );
+    }
+
+    if (route === "/categories" && method === "POST") {
+      if (!can("settings.edit"))
+        return forbidden("Your role cannot manage categories.");
+      const body = await request.json();
+      const name = String(body.name || body.category || "").trim();
+      if (!name)
+        return handleCORS(
+          NextResponse.json(
+            { error: "Category name is required" },
+            { status: 400 },
+          ),
+        );
+      await db.collection("workspace_config").updateOne(
+        { id: "default" },
+        { $addToSet: { categories: name } },
+        { upsert: true },
+      );
+      const options = await db.collection("workspace_config").findOne(
+        { id: "default" },
+        { projection: { categories: 1 } },
+      );
+      return handleCORS(NextResponse.json({ categories: options.categories }));
+    }
+
+    if (route === "/categories" && (method === "PUT" || method === "DELETE")) {
+      if (!can("settings.edit"))
+        return forbidden("Your role cannot manage categories.");
+      const body = await request.json();
+      const oldName = String(body.oldName || body.name || "").trim();
+      if (!oldName)
+        return handleCORS(
+          NextResponse.json({ error: "Category name is required" }, { status: 400 }),
+        );
+      const config = await db.collection("workspace_config").findOne({ id: "default" });
+      const categories = config?.categories || [];
+      if (!categories.includes(oldName))
+        return handleCORS(
+          NextResponse.json({ error: "Category not found" }, { status: 404 }),
+        );
+      if (method === "DELETE") {
+        await db.collection("workspace_config").updateOne(
+          { id: "default" },
+          {
+            $pull: {
+              categories: oldName,
+              subcategoryRelations: { category: oldName },
+            },
+          },
+        );
+        await db.collection("blogs").updateMany(
+          { category: oldName },
+          { $set: { category: "", subcategory: "" } },
+        );
+        return handleCORS(NextResponse.json({ ok: true }));
+      }
+      const newName = String(body.newName || "").trim();
+      if (!newName)
+        return handleCORS(
+          NextResponse.json({ error: "New category name is required" }, { status: 400 }),
+        );
+      if (newName !== oldName && categories.includes(newName))
+        return handleCORS(
+          NextResponse.json({ error: "Category already exists" }, { status: 400 }),
+        );
+      const relations = (config?.subcategoryRelations || []).map((item) =>
+        item.category === oldName ? { ...item, category: newName } : item,
+      );
+      await db.collection("workspace_config").updateOne(
+        { id: "default" },
+        {
+          $set: {
+            categories: categories.map((item) => (item === oldName ? newName : item)),
+            subcategoryRelations: relations,
+          },
+        },
+      );
+      await db.collection("blogs").updateMany(
+        { category: oldName },
+        { $set: { category: newName } },
+      );
+      return handleCORS(NextResponse.json({ ok: true, name: newName }));
+    }
+
+    if (route === "/subcategories" && method === "POST") {
+      if (!can("settings.edit"))
+        return forbidden("Your role cannot manage subcategories.");
+      const body = await request.json();
+      const name = String(body.name || body.subcategory || "").trim();
+      const category = String(body.category || "").trim();
+      if (!name)
+        return handleCORS(
+          NextResponse.json(
+            { error: "Subcategory name is required" },
+            { status: 400 },
+          ),
+        );
+      const update = { $addToSet: { subcategories: name } };
+      if (category)
+        update.$addToSet.subcategoryRelations = { subcategory: name, category };
+      await db.collection("workspace_config").updateOne(
+        { id: "default" },
+        update,
+        { upsert: true },
+      );
+      const options = await db.collection("workspace_config").findOne(
+        { id: "default" },
+        { projection: { subcategories: 1, subcategoryRelations: 1 } },
+      );
+      return handleCORS(
+        NextResponse.json({
+          subcategories: options.subcategories || [],
+          subcategoryRelations: options.subcategoryRelations || [],
+        }),
+      );
+    }
+
+    if (
+      route === "/subcategories" &&
+      (method === "PUT" || method === "DELETE")
+    ) {
+      if (!can("settings.edit"))
+        return forbidden("Your role cannot manage subcategories.");
+      const body = await request.json();
+      const oldName = String(body.oldName || body.name || "").trim();
+      if (!oldName)
+        return handleCORS(
+          NextResponse.json(
+            { error: "Subcategory name is required" },
+            { status: 400 },
+          ),
+        );
+      const config = await db.collection("workspace_config").findOne({
+        id: "default",
+      });
+      const subcategories = config?.subcategories || [];
+      if (!subcategories.includes(oldName))
+        return handleCORS(
+          NextResponse.json(
+            { error: "Subcategory not found" },
+            { status: 404 },
+          ),
+        );
+      if (method === "DELETE") {
+        await db.collection("workspace_config").updateOne(
+          { id: "default" },
+          {
+            $pull: {
+              subcategories: oldName,
+              subcategoryRelations: { subcategory: oldName },
+            },
+          },
+        );
+        await db.collection("blogs").updateMany(
+          { subcategory: oldName },
+          { $set: { subcategory: "" } },
+        );
+        return handleCORS(NextResponse.json({ ok: true }));
+      }
+      const newName = String(body.newName || "").trim();
+      if (!newName)
+        return handleCORS(
+          NextResponse.json(
+            { error: "New subcategory name is required" },
+            { status: 400 },
+          ),
+        );
+      if (newName !== oldName && subcategories.includes(newName))
+        return handleCORS(
+          NextResponse.json(
+            { error: "Subcategory already exists" },
+            { status: 400 },
+          ),
+        );
+      const relations = (config?.subcategoryRelations || []).map((item) =>
+        item.subcategory === oldName
+          ? { ...item, subcategory: newName }
+          : item,
+      );
+      await db.collection("workspace_config").updateOne(
+        { id: "default" },
+        {
+          $set: {
+            subcategories: subcategories.map((item) =>
+              item === oldName ? newName : item,
+            ),
+            subcategoryRelations: relations,
+          },
+        },
+      );
+      await db.collection("blogs").updateMany(
+        { subcategory: oldName },
+        { $set: { subcategory: newName } },
+      );
+      return handleCORS(NextResponse.json({ ok: true, name: newName }));
     }
 
     if (route === "/roles" && method === "POST") {
