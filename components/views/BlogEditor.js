@@ -245,6 +245,14 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const { data: contentOptions } = useSWR("/api/content-options", fetcher);
   const categories = contentOptions?.categories || [];
   const subcategories = contentOptions?.subcategories || [];
+  const subcategoryRelations = contentOptions?.subcategoryRelations || [];
+  const relatedSubcategories = useMemo(() => {
+    if (!form.category || !subcategoryRelations.length) return subcategories;
+    const related = subcategoryRelations
+      .filter((item) => item.category === form.category)
+      .map((item) => item.subcategory);
+    return related.length ? related : subcategories;
+  }, [form.category, subcategories, subcategoryRelations]);
 
   // Load blog
   useEffect(() => {
@@ -1212,7 +1220,16 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 <Labeled label="Category" required>
                   <Select
                     value={form.category || ""}
-                    onValueChange={(v) => up({ category: v })}
+                    onValueChange={(v) =>
+                      up({
+                        category: v,
+                        subcategory: relatedSubcategories.includes(
+                          form.subcategory,
+                        )
+                          ? form.subcategory
+                          : "",
+                      })
+                    }
                   >
                     <SelectTrigger id="f-category" className="bg-muted/30">
                       <SelectValue placeholder="Select category" />
@@ -1235,7 +1252,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                       <SelectValue placeholder="Select subcategory" />
                     </SelectTrigger>
                     <SelectContent>
-                      {subcategories.map((c) => (
+                      {relatedSubcategories.map((c) => (
                         <SelectItem key={c} value={c}>
                           {c}
                         </SelectItem>

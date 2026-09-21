@@ -204,18 +204,10 @@ export const NAV = [
     items: [
       {
         key: "settings",
-        label: "General Settings",
+        label: "Settings",
         icon: Settings,
         params: {
           tab: "general",
-        },
-      },
-      {
-        key: "settings",
-        label: "SEO Settings",
-        icon: SlidersHorizontal,
-        params: {
-          tab: "seo",
         },
       },
       {
