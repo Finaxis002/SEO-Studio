@@ -424,9 +424,7 @@ export default function SettingsView({ tab: initialTab, user }) {
           <CardContent className="p-5 space-y-3">
             <div>
               <p className="text-[13px] font-medium">Content categories</p>
-              <p className="text-[11px] text-muted-foreground">
-                These values are stored in the database and appear in the Blog Editor.
-              </p>
+  
             </div>
             <Button variant="outline" onClick={() => setAddCategoryOpen(true)}>
               Add category
