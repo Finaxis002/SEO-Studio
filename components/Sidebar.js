@@ -210,22 +210,7 @@ export const NAV = [
           tab: "general",
         },
       },
-      {
-        key: "settings",
-        label: "Publishing Settings",
-        icon: Send,
-        params: {
-          tab: "publishing",
-        },
-      },
-      {
-        key: "settings",
-        label: "Profile",
-        icon: UserCircle,
-        params: {
-          tab: "profile",
-        },
-      },
+      
     ],
   },
 ]

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
-import { Check, Pencil, Save, Sun, Trash2, X } from "lucide-react";
+import { Pencil, Save, Sun, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,8 +19,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Labeled } from "../bits";
+import { ConfirmDialog, Labeled } from "../bits";
 import { api, fetcher, initials } from "@/lib/client";
 import { useTheme } from "next-themes";
 
@@ -38,6 +46,9 @@ export default function SettingsView({ tab: initialTab, user }) {
   const [subcategoryCategory, setSubcategoryCategory] = useState("");
   const [editingCategory, setEditingCategory] = useState(null);
   const [editingSubcategory, setEditingSubcategory] = useState(null);
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false);
+  const [addSubcategoryOpen, setAddSubcategoryOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const { theme, setTheme } = useTheme();
 
   useEffect(() => {
@@ -85,6 +96,7 @@ export default function SettingsView({ tab: initialTab, user }) {
       });
       setNewCategory("");
       mutateContentOptions();
+      setAddCategoryOpen(false);
       toast.success("Category added");
     } catch (e) {
       toast.error(e.message);
@@ -99,7 +111,9 @@ export default function SettingsView({ tab: initialTab, user }) {
         body: { name: newSubcategory, category: subcategoryCategory },
       });
       setNewSubcategory("");
+      setSubcategoryCategory("");
       mutateContentOptions();
+      setAddSubcategoryOpen(false);
       toast.success("Subcategory added");
     } catch (e) {
       toast.error(e.message);
@@ -127,7 +141,6 @@ export default function SettingsView({ tab: initialTab, user }) {
   };
 
   const deleteContentOption = async (type, name) => {
-    if (!window.confirm("Delete " + name + "? Existing blogs will lose this value.")) return;
     try {
       await api("/" + (type === "category" ? "categories" : "subcategories"), {
         method: "DELETE",
@@ -135,6 +148,7 @@ export default function SettingsView({ tab: initialTab, user }) {
       });
       mutateContentOptions();
       toast.success(type === "category" ? "Category deleted" : "Subcategory deleted");
+      setDeleteTarget(null);
     } catch (e) {
       toast.error(e.message);
     }
@@ -165,6 +179,115 @@ export default function SettingsView({ tab: initialTab, user }) {
           </TabsTrigger>
         </TabsList>
       </Tabs>
+
+      <Dialog open={addCategoryOpen} onOpenChange={setAddCategoryOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add category</DialogTitle>
+            <DialogDescription>Add a category for the Blog Editor.</DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            placeholder="Category name"
+            onKeyDown={(e) => e.key === "Enter" && addCategory()}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddCategoryOpen(false)}>Cancel</Button>
+            <Button onClick={addCategory}>Add category</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addSubcategoryOpen} onOpenChange={setAddSubcategoryOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add subcategory</DialogTitle>
+            <DialogDescription>Optionally associate this subcategory with a category.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              autoFocus
+              value={newSubcategory}
+              onChange={(e) => setNewSubcategory(e.target.value)}
+              placeholder="Subcategory name"
+              onKeyDown={(e) => e.key === "Enter" && addSubcategory()}
+            />
+            <Select value={subcategoryCategory} onValueChange={setSubcategoryCategory}>
+              <SelectTrigger className="bg-muted/30"><SelectValue placeholder="Category (optional)" /></SelectTrigger>
+              <SelectContent>
+                {(contentOptions?.categories || []).map((category) => (
+                  <SelectItem key={category} value={category}>{category}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddSubcategoryOpen(false)}>Cancel</Button>
+            <Button onClick={addSubcategory}>Add subcategory</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingCategory} onOpenChange={(open) => !open && setEditingCategory(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit category</DialogTitle>
+            <DialogDescription>Rename this category across the workspace.</DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={editingCategory?.name || ""}
+            onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
+            onKeyDown={(e) => e.key === "Enter" && updateContentOption("category", editingCategory.oldName, editingCategory.name)}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingCategory(null)}>Cancel</Button>
+            <Button onClick={() => updateContentOption("category", editingCategory.oldName, editingCategory.name)}>Save changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingSubcategory} onOpenChange={(open) => !open && setEditingSubcategory(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit subcategory</DialogTitle>
+            <DialogDescription>Rename this subcategory across the workspace.</DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={editingSubcategory?.name || ""}
+            onChange={(e) => setEditingSubcategory({ ...editingSubcategory, name: e.target.value })}
+            onKeyDown={(e) => e.key === "Enter" && updateContentOption("subcategory", editingSubcategory.oldName, editingSubcategory.name)}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingSubcategory(null)}>Cancel</Button>
+            <Button onClick={() => updateContentOption("subcategory", editingSubcategory.oldName, editingSubcategory.name)}>Save changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={
+          deleteTarget
+            ? "Delete " + deleteTarget.type + "?"
+            : "Delete item?"
+        }
+        description={
+          deleteTarget
+            ? 'Delete "' +
+              deleteTarget.name +
+              '"? Existing blogs will lose this value.'
+            : "This item will be removed."
+        }
+        onConfirm={() =>
+          deleteTarget &&
+          deleteContentOption(deleteTarget.type, deleteTarget.name)
+        }
+      />
 
       {tab === "general" && (
         <Card className="card-hover max-w-3xl">
@@ -301,101 +424,29 @@ export default function SettingsView({ tab: initialTab, user }) {
           <CardContent className="p-5 space-y-3">
             <div>
               <p className="text-[13px] font-medium">Content categories</p>
-              <p className="text-[11px] text-muted-foreground">
-                These values are stored in the database and appear in the Blog Editor.
-              </p>
+  
             </div>
-            <div className="flex gap-2">
-              <Input
-                value={newCategory}
-                onChange={(e) => setNewCategory(e.target.value)}
-                placeholder="New category"
-                onKeyDown={(e) => e.key === "Enter" && addCategory()}
-              />
-              <Button variant="outline" onClick={addCategory}>
-                Add category
-              </Button>
-            </div>
+            <Button variant="outline" onClick={() => setAddCategoryOpen(true)}>
+              Add category
+            </Button>
             <div className="flex flex-wrap gap-1.5">
               {(contentOptions?.categories || []).map((category) => (
                 <div key={category} className="flex items-center gap-1 rounded-md border px-2 py-1">
-                  {editingCategory?.oldName === category ? (
-                    <Input
-                      autoFocus
-                      className="h-6 w-36 text-xs"
-                      value={editingCategory.name}
-                      onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") updateContentOption("category", category, editingCategory.name);
-                        if (e.key === "Escape") setEditingCategory(null);
-                      }}
-                    />
-                  ) : (
                     <Badge variant="outline" className="border-0 px-0">{category}</Badge>
-                  )}
-                  {editingCategory?.oldName === category ? (
-                    <>
-                      <button type="button" title="Save category" onClick={() => updateContentOption("category", category, editingCategory.name)}><Check className="h-3.5 w-3.5 text-emerald-600" /></button>
-                      <button type="button" title="Cancel" onClick={() => setEditingCategory(null)}><X className="h-3.5 w-3.5" /></button>
-                    </>
-                  ) : (
-                    <>
-                      <button type="button" title="Edit category" onClick={() => setEditingCategory({ oldName: category, name: category })}><Pencil className="h-3 w-3 text-muted-foreground" /></button>
-                      <button type="button" title="Delete category" onClick={() => deleteContentOption("category", category)}><Trash2 className="h-3 w-3 text-rose-600" /></button>
-                    </>
-                  )}
+                    <button type="button" title="Edit category" onClick={() => setEditingCategory({ oldName: category, name: category })}><Pencil className="h-3 w-3 text-muted-foreground" /></button>
+                    <button type="button" title="Delete category" onClick={() => setDeleteTarget({ type: "category", name: category })}><Trash2 className="h-3 w-3 text-red-600" /></button>
                 </div>
               ))}
             </div>
-            <div className="space-y-2 pt-2 border-t">
-              <Input
-                value={newSubcategory}
-                onChange={(e) => setNewSubcategory(e.target.value)}
-                placeholder="New subcategory"
-                onKeyDown={(e) => e.key === "Enter" && addSubcategory()}
-              />
-              <Select value={subcategoryCategory} onValueChange={setSubcategoryCategory}>
-                <SelectTrigger className="bg-muted/30">
-                  <SelectValue placeholder="Category (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(contentOptions?.categories || []).map((category) => (
-                    <SelectItem key={category} value={category}>{category}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button variant="outline" className="w-full" onClick={addSubcategory}>
-                Add subcategory
-              </Button>
-            </div>
+            <Button variant="outline" className="w-full" onClick={() => setAddSubcategoryOpen(true)}>
+              Add subcategory
+            </Button>
             <div className="flex flex-wrap gap-1.5">
               {(contentOptions?.subcategories || []).map((subcategory) => (
                 <div key={subcategory} className="flex items-center gap-1 rounded-md border px-2 py-1">
-                  {editingSubcategory?.oldName === subcategory ? (
-                    <Input
-                      autoFocus
-                      className="h-6 w-36 text-xs"
-                      value={editingSubcategory.name}
-                      onChange={(e) => setEditingSubcategory({ ...editingSubcategory, name: e.target.value })}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") updateContentOption("subcategory", subcategory, editingSubcategory.name);
-                        if (e.key === "Escape") setEditingSubcategory(null);
-                      }}
-                    />
-                  ) : (
-                    <Badge variant="outline" className="border-0 px-0">{subcategory}</Badge>
-                  )}
-                  {editingSubcategory?.oldName === subcategory ? (
-                    <>
-                      <button type="button" title="Save subcategory" onClick={() => updateContentOption("subcategory", subcategory, editingSubcategory.name)}><Check className="h-3.5 w-3.5 text-emerald-600" /></button>
-                      <button type="button" title="Cancel" onClick={() => setEditingSubcategory(null)}><X className="h-3.5 w-3.5" /></button>
-                    </>
-                  ) : (
-                    <>
-                      <button type="button" title="Edit subcategory" onClick={() => setEditingSubcategory({ oldName: subcategory, name: subcategory })}><Pencil className="h-3 w-3 text-muted-foreground" /></button>
-                      <button type="button" title="Delete subcategory" onClick={() => deleteContentOption("subcategory", subcategory)}><Trash2 className="h-3 w-3 text-rose-600" /></button>
-                    </>
-                  )}
+                  <Badge variant="outline" className="border-0 px-0">{subcategory}</Badge>
+                  <button type="button" title="Edit subcategory" onClick={() => setEditingSubcategory({ oldName: subcategory, name: subcategory })}><Pencil className="h-3 w-3 text-muted-foreground" /></button>
+                  <button type="button" title="Delete subcategory" onClick={() => setDeleteTarget({ type: "subcategory", name: subcategory })}><Trash2 className="h-3 w-3 text-red-600" /></button>
                 </div>
               ))}
             </div>
