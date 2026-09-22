@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from "uuid";
 import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
+import sharp from "sharp";
 import { getDb, clean } from "../../../lib/db";
 import { ensureSeeded } from "../../../lib/seed";
 import { analyzeSeo, slugify } from "../../../lib/seo";
@@ -92,19 +93,25 @@ function readPermission(route, method, path) {
   if (route === "/keywords" || (path[0] === "keywords" && path.length === 2))
     return "seo.view";
   if (route === "/team" || (path[0] === "team" && path.length === 2))
-    return "team.view";
+    return ["team.view", "blogs.view", "blogs.create", "blogs.edit"];
   if (route === "/roles" || (path[0] === "roles" && path.length === 2))
-    return "team.view";
-  if (route === "/permissions") return "team.view";
+    return null;
+  if (route === "/permissions") return null;
   if (route === "/team-options") return "team.view";
   if (route === "/settings-options") return "settings.view";
   if (route === "/content-options")
     return ["blogs.view", "blogs.create", "blogs.edit", "settings.edit"];
-  if (route === "/activity") return "team.view";
+  if (route === "/activity") return null;
   if (route === "/seo-issues") return "seo.issues.view";
   if (route === "/settings") return "settings.view";
   if (route === "/categories" || route === "/subcategories")
-    return ["blogs.view", "settings.edit"];
+    return [
+      "blogs.view",
+      "blogs.create",
+      "blogs.edit",
+      "settings.view",
+      "settings.edit",
+    ];
   if (route === "/generate-outline") return "blogs.create";
   return null;
 }
@@ -192,15 +199,23 @@ const TRANSITIONS = {
   approved: {
     scheduled: { perm: "blogs.schedule", label: "scheduled" },
     in_review: { perm: "blogs.edit", label: "sent back to review" },
+    draft: { perm: "blogs.edit", label: "moved to draft" },
     published: { perm: "blogs.publish", label: "published" },
   },
   scheduled: {
     published: { perm: "blogs.publish", label: "published" },
+    in_review: { perm: "blogs.edit", label: "sent back to review" },
     draft: { perm: "blogs.edit", label: "cancelled schedule" },
   },
-  published: { archived: { perm: "blogs.archive", label: "archived" } },
+  published: {
+    published: { perm: "blogs.publish", label: "updated" },
+    in_review: { perm: "blogs.edit", label: "submitted for review" },
+    draft: { perm: "blogs.edit", label: "moved to draft" },
+    archived: { perm: "blogs.archive", label: "archived" },
+  },
   archived: {
     draft: { perm: "blogs.edit", label: "moved to draft" },
+    in_review: { perm: "blogs.edit", label: "submitted for review" },
     published: { perm: "blogs.publish", label: "republished" },
   },
 };
@@ -228,7 +243,8 @@ function newBlogDoc(body, user) {
     wordCount: 0,
     status: "draft",
     scheduledAt: null,
-    publishedAt: null,
+    publishedAt: body.publishedAt || null,
+    reviewFeedback: body.reviewFeedback || null,
     createdAt: now,
     updatedAt: now,
     seo: Object.assign(
@@ -474,6 +490,9 @@ async function handleRoute(request, { params }) {
           { status: 200 },
         ),
       );
+    const roleDoc = member.role
+      ? await db.collection("roles").findOne({ name: member.role })
+      : null;
     return handleCORS(
       NextResponse.json({
         authenticated: true,
@@ -483,6 +502,7 @@ async function handleRoute(request, { params }) {
           email: member.email,
           role: member.role,
           status: member.status,
+          permissions: roleDoc?.permissions || [],
         }),
       }),
     );
@@ -563,6 +583,7 @@ async function handleRoute(request, { params }) {
       const rawItems = await db
         .collection("blogs")
         .find(filter)
+        .project({ contentHtml: 0, savedSuggestions: 0, brief: 0 })
         .sort({ publishedAt: -1, updatedAt: -1, createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -686,6 +707,8 @@ async function handleRoute(request, { params }) {
         NextResponse.json({
           blog: {
             ...cleanedBlog,
+            publishedAt: cleanedBlog.publishedAt || cleanedBlog.createdAt,
+            updatedAt: cleanedBlog.updatedAt || cleanedBlog.createdAt,
             wordCount: words,
             readingTime: Math.max(1, Math.ceil(words / 200)) + " min read",
           },
@@ -975,6 +998,7 @@ async function handleRoute(request, { params }) {
       const items = await db
         .collection("blogs")
         .find(filter)
+        .project({ contentHtml: 0, savedSuggestions: 0, brief: 0 })
         .sort(sort)
         .skip((page - 1) * limit)
         .limit(limit)
@@ -1014,6 +1038,19 @@ async function handleRoute(request, { params }) {
         return forbidden("Your role cannot create blogs.");
       const body = await request.json();
       const doc = newBlogDoc(body, user);
+      if (body.author) {
+        const authorMember = await db.collection("team").findOne({
+          $or: [
+            { name: body.author },
+            { id: body.author },
+            { email: body.author },
+          ],
+        });
+        if (authorMember) {
+          doc.author = authorMember.name;
+          doc.authorId = authorMember.id;
+        }
+      }
       const settings = await publishingSettings(db);
       const defaultStatus = settings.publishing?.defaultStatus;
       if (defaultStatus === "draft" || defaultStatus === "in_review")
@@ -1089,7 +1126,8 @@ async function handleRoute(request, { params }) {
       if (
         to === "published" &&
         publishing.requireApproval &&
-        blog.status !== "approved"
+        blog.status !== "approved" &&
+        blog.status !== "published"
       )
         return handleCORS(
           NextResponse.json(
@@ -1099,12 +1137,14 @@ async function handleRoute(request, { params }) {
         );
       if (to === "published" && publishing.checklistEnabled) {
         const missing = [];
-        if (!(blog.seo?.metaTitle || blog.title)) missing.push("Title / SEO title");
+        if (!(blog.seo?.metaTitle || blog.title))
+          missing.push("Title / SEO title");
         if ((blog.seo?.metaDescription || "").length < 120)
           missing.push("Meta description (minimum 120 characters)");
         if (!blog.seo?.focusKeyword) missing.push("Focus keyword");
         if (!blog.featuredImage?.url) missing.push("Featured image");
-        if (!(blog.featuredImage?.alt || "").trim()) missing.push("Featured image alt text");
+        if (!(blog.featuredImage?.alt || "").trim())
+          missing.push("Featured image alt text");
         if (!blog.author) missing.push("Author");
         if (!blog.category) missing.push("Category");
 
@@ -1121,10 +1161,36 @@ async function handleRoute(request, { params }) {
           );
       }
       const update = { status: to, updatedAt: new Date().toISOString() };
-      if (to === "published") update.publishedAt = new Date().toISOString();
+      if (to === "published" && !blog.publishedAt) {
+        update.publishedAt = new Date().toISOString();
+      }
       if (to === "scheduled" && body.scheduledAt)
         update.scheduledAt = body.scheduledAt;
-      if (to === "draft") update.scheduledAt = null;
+      if (to === "draft") {
+        update.scheduledAt = null;
+        if (body.feedback) {
+          update.reviewFeedback = {
+            note: (body.feedback.note || "").trim(),
+            reasons: Array.isArray(body.feedback.reasons)
+              ? body.feedback.reasons
+              : [],
+            requestedBy: user.name || "Reviewer",
+            requestedByEmail: user.email || "",
+            requestedAt: new Date().toISOString(),
+            resolved: false,
+          };
+        }
+      }
+      if (to === "in_review" || to === "approved" || to === "published") {
+        if (blog.reviewFeedback && !blog.reviewFeedback.resolved) {
+          update.reviewFeedback = {
+            ...blog.reviewFeedback,
+            resolved: true,
+            resolvedAt: new Date().toISOString(),
+          };
+        }
+      }
+      if (to === "archived") update.archivedAt = new Date().toISOString();
       await db.collection("blogs").updateOne({ id: blog.id }, { $set: update });
       const updated = { ...blog, ...update };
       await recordActivity(
@@ -1132,13 +1198,19 @@ async function handleRoute(request, { params }) {
         "blog",
         blog.title + " — " + rule.label,
       );
-      if (to === "published")
+      if (to === "published") {
+        const isUpdate = blog.status === "published";
         await notify(
           db,
           "publish",
-          "Blog published successfully",
-          '"' + blog.title + '" is now live on the website.',
+          isUpdate
+            ? "Blog updated successfully"
+            : "Blog published successfully",
+          isUpdate
+            ? '"' + blog.title + '" changes are now live.'
+            : '"' + blog.title + '" is now live on the website.',
         );
+      }
       if (to === "scheduled")
         await notify(
           db,
@@ -1159,6 +1231,49 @@ async function handleRoute(request, { params }) {
           "Blog requires SEO review",
           '"' + blog.title + '" was submitted for review by ' + user.name + ".",
         );
+      if (to === "approved")
+        await notify(
+          db,
+          "approved",
+          "Blog approved",
+          '"' +
+            blog.title +
+            '" was approved by ' +
+            user.name +
+            " and is ready to publish.",
+        );
+      if (to === "draft" && blog.status === "in_review") {
+        if (body.feedback) {
+          const feedbackSnippet = body.feedback?.note
+            ? ': "' +
+              body.feedback.note.slice(0, 100) +
+              (body.feedback.note.length > 100 ? "..." : "") +
+              '"'
+            : "";
+          await notify(
+            db,
+            "review",
+            "Revisions requested",
+            '"' +
+              blog.title +
+              '" was sent back to draft for revisions by ' +
+              user.name +
+              "." +
+              (feedbackSnippet ? " Note" + feedbackSnippet : ""),
+          );
+        } else {
+          await notify(
+            db,
+            "review",
+            "Review withdrawn",
+            '"' +
+              blog.title +
+              '" was withdrawn from review back to draft by ' +
+              user.name +
+              " for further edits.",
+          );
+        }
+      }
       return handleCORS(NextResponse.json(clean(updated)));
     }
 
@@ -1197,13 +1312,34 @@ async function handleRoute(request, { params }) {
           "brief",
           "savedSuggestions",
           "scheduledAt",
+          "publishedAt",
+          "archivedAt",
+          "reviewFeedback",
         ];
         fields.forEach((f) => {
           if (body[f] !== undefined) update[f] = body[f];
         });
+        if (body.author) {
+          const authorMember = await db.collection("team").findOne({
+            $or: [
+              { name: body.author },
+              { id: body.author },
+              { email: body.author },
+            ],
+          });
+          if (authorMember) {
+            update.author = authorMember.name;
+            update.authorId = authorMember.id;
+          }
+        }
         const merged = { ...existing, ...update };
         const a = analyzeSeo(merged);
-        update["seo.score"] = a.score;
+        if (update.seo) {
+          update.seo = { ...update.seo, score: a.score };
+          delete update["seo.score"];
+        } else {
+          update["seo.score"] = a.score;
+        }
         update.wordCount = a.stats.words;
         await db.collection("blogs").updateOne({ id }, { $set: update });
         await syncMediaUsage(db, {
@@ -1369,23 +1505,59 @@ async function handleRoute(request, { params }) {
       const created = [];
       try {
         for (const file of files) {
-          const buf = Buffer.from(await file.arrayBuffer());
-          const result = await uploadBuffer(buf, file.name, folder);
-          const mime = file.type || "";
-          const format = (
-            result.format ||
-            file.name.split(".").pop() ||
-            "bin"
-          ).toUpperCase();
+          let buf = Buffer.from(await file.arrayBuffer());
+          let filename = file.name;
+          let mime = file.type || "";
+          const isImage =
+            mime.startsWith("image/") ||
+            /\.(jpe?g|png|webp|avif|tiff|bmp)$/i.test(filename);
+          const isSvgOrGif =
+            mime.includes("svg") ||
+            mime.includes("gif") ||
+            /\.(svg|gif)$/i.test(filename);
+
+          let format = (file.name.split(".").pop() || "bin").toUpperCase();
+          let compressed = format === "WEBP";
+
+          // Auto-convert to WebP + Auto-Orient + Compress (82% quality) + Max Width (2048px)
+          if (isImage && !isSvgOrGif) {
+            try {
+              buf = await sharp(buf)
+                .rotate() // auto-orient based on EXIF (fixes sideways smartphone photos)
+                .resize({
+                  width: 2048,
+                  withoutEnlargement: true, // keep high-res up to 2K, never upscale smaller images
+                })
+                .webp({
+                  quality: 82,
+                  effort: 4,
+                })
+                .toBuffer();
+
+              filename = filename.replace(/\.[^/.]+$/, "") + ".webp";
+              mime = "image/webp";
+              format = "WEBP";
+              compressed = true;
+            } catch (optError) {
+              console.warn(
+                "Auto-WebP optimization skipped for",
+                filename,
+                optError.message,
+              );
+            }
+          }
+
+          const result = await uploadBuffer(buf, filename, folder);
+          const finalFormat = (result.format || format || "WEBP").toUpperCase();
           const doc = {
             id: uuidv4(),
-            name: file.name,
+            name: filename,
             url: result.secure_url,
             publicId: result.public_id,
             storage: "cloudinary",
             type: mime.startsWith("video")
               ? "video"
-              : mime.startsWith("image")
+              : mime.startsWith("image") || isImage
                 ? "image"
                 : "document",
             folder,
@@ -1394,19 +1566,19 @@ async function handleRoute(request, { params }) {
               width: result.width || 0,
               height: result.height || 0,
             },
-            format,
+            format: finalFormat,
             alt: form.get("alt") || "",
-            title: form.get("title") || "",
+            title: form.get("title") || filename,
             caption: "",
-            description: "",
+            description: compressed ? "Auto-optimized (WebP, 82% quality)" : "",
             uploadedBy: user.name,
             uploadedAt: new Date().toISOString(),
             usedIn: [],
-            compressed: format === "WEBP",
+            compressed: finalFormat === "WEBP" || compressed,
           };
           await db.collection("media").insertOne(doc);
           created.push(doc);
-          await recordActivity("uploaded", "media", file.name);
+          await recordActivity("uploaded", "media", filename);
         }
       } catch (error) {
         return handleCORS(
@@ -1417,6 +1589,120 @@ async function handleRoute(request, { params }) {
         );
       }
       return handleCORS(NextResponse.json(clean(created), { status: 201 }));
+    }
+
+    // ---------- MEDIA OPTIMIZE (Server-Side WebP & Compress) ----------
+    if (route === "/media/optimize" && method === "POST") {
+      if (!can("media.upload") && !can("media.edit"))
+        return forbidden("Your role cannot optimize media.");
+      try {
+        const body = await request.json();
+        const {
+          url,
+          mode = "webp",
+          quality,
+          filename,
+          folder = "Featured Images",
+        } = body;
+        if (!url) {
+          return handleCORS(
+            NextResponse.json(
+              { error: "Image URL is required" },
+              { status: 400 },
+            ),
+          );
+        }
+
+        // Fetch original image buffer
+        let originalBuf;
+        if (url.startsWith("/uploads/")) {
+          const localPath = path.join(process.cwd(), "public", url);
+          originalBuf = await fs.readFile(localPath);
+        } else {
+          const imgRes = await fetch(url, {
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            },
+          });
+          if (!imgRes.ok) {
+            throw new Error(
+              `Failed to fetch image (${imgRes.status} ${imgRes.statusText})`,
+            );
+          }
+          originalBuf = Buffer.from(await imgRes.arrayBuffer());
+        }
+
+        const q = quality || (mode === "compress" ? 72 : 82);
+        const webpBuf = await sharp(originalBuf)
+          .webp({ quality: q, effort: 4 })
+          .toBuffer();
+
+        const cleanName = (filename || "image")
+          .replace(/\.[^.]+$/, "")
+          .replace(/[^a-zA-Z0-9_-]/g, "_");
+        const baseName = `${cleanName}-${Date.now()}.webp`;
+
+        const result = await uploadBuffer(webpBuf, baseName, folder);
+
+        const doc = {
+          id: uuidv4(),
+          name: baseName,
+          url: result.secure_url,
+          publicId: result.public_id,
+          storage: "cloudinary",
+          type: "image",
+          folder,
+          size: result.bytes || webpBuf.length,
+          dimensions: {
+            width: result.width || 0,
+            height: result.height || 0,
+          },
+          format: "WEBP",
+          alt: body.alt || "",
+          title: baseName,
+          caption: "",
+          description: `Optimized via ${
+            mode === "compress" ? "Compression" : "WebP conversion"
+          }`,
+          uploadedBy: user.name,
+          uploadedAt: new Date().toISOString(),
+          usedIn: [],
+          compressed: true,
+        };
+
+        await db.collection("media").insertOne(doc);
+        await recordActivity("uploaded", "media", baseName);
+
+        const originalSize = originalBuf.length;
+        const newSize = result.bytes || webpBuf.length;
+        const savedPercent = Math.max(
+          0,
+          Math.round(((originalSize - newSize) / originalSize) * 100),
+        );
+
+        return handleCORS(
+          NextResponse.json({
+            success: true,
+            url: result.secure_url,
+            publicId: result.public_id,
+            storage: "cloudinary",
+            format: "WEBP",
+            size: newSize,
+            originalSize,
+            savedPercent,
+            doc: clean(doc),
+          }),
+        );
+      } catch (err) {
+        console.error("Optimize media error:", err);
+        return handleCORS(
+          NextResponse.json(
+            { error: err.message || "Could not optimize this image" },
+            { status: 500 },
+          ),
+        );
+      }
     }
 
     // ---------- KEYWORDS ----------
@@ -1690,12 +1976,45 @@ async function handleRoute(request, { params }) {
 
     // ---------- TEAM ----------
     if (route === "/team" && method === "GET") {
-      const items = await db
-        .collection("team")
-        .find({})
-        .sort({ name: 1 })
-        .toArray();
-      return handleCORS(NextResponse.json(clean(items.map(publicMember))));
+      const [members, blogs] = await Promise.all([
+        db.collection("team").find({}).sort({ name: 1 }).toArray(),
+        db
+          .collection("blogs")
+          .find({}, { projection: { author: 1, authorId: 1, status: 1 } })
+          .toArray(),
+      ]);
+
+      const memberById = new Map(members.map((m) => [m.id, m]));
+      const memberByName = new Map(
+        members.map((m) => [(m.name || "").trim().toLowerCase(), m]),
+      );
+
+      const counts = new Map();
+      members.forEach((m) => counts.set(m.id, { created: 0, published: 0 }));
+
+      blogs.forEach((b) => {
+        const m =
+          (b.author && memberByName.get(b.author.trim().toLowerCase())) ||
+          (b.authorId && memberById.get(b.authorId));
+        if (m) {
+          const stat = counts.get(m.id);
+          if (stat) {
+            stat.created++;
+            if (b.status === "published") stat.published++;
+          }
+        }
+      });
+
+      const enriched = members.map((m) => {
+        const stat = counts.get(m.id) || { created: 0, published: 0 };
+        return {
+          ...publicMember(m),
+          blogsCreated: stat.created,
+          blogsPublished: stat.published,
+        };
+      });
+
+      return handleCORS(NextResponse.json(clean(enriched)));
     }
 
     if (route === "/team" && method === "POST") {
@@ -1830,36 +2149,35 @@ async function handleRoute(request, { params }) {
     }
 
     if (route === "/content-options" && method === "GET") {
-      const options = await db
-        .collection("workspace_config")
-        .findOne(
-          { id: "default" },
-          {
-            projection: {
-              categories: 1,
-              subcategories: 1,
-              subcategoryRelations: 1,
-            },
+      const options = await db.collection("workspace_config").findOne(
+        { id: "default" },
+        {
+          projection: {
+            categories: 1,
+            subcategories: 1,
+            subcategoryRelations: 1,
           },
-        );
+        },
+      );
       return handleCORS(
-        NextResponse.json(clean(options || { categories: [], subcategories: [] })),
+        NextResponse.json(
+          clean(options || { categories: [], subcategories: [] }),
+        ),
       );
     }
 
     if (route === "/categories" && method === "GET") {
-      const options = await db.collection("workspace_config").findOne(
-        { id: "default" },
-        { projection: { categories: 1 } },
-      );
+      const options = await db
+        .collection("workspace_config")
+        .findOne({ id: "default" }, { projection: { categories: 1 } });
       return handleCORS(
         NextResponse.json({ categories: options?.categories || [] }),
       );
     }
 
     if (route === "/categories" && method === "POST") {
-      if (!can("settings.edit"))
-        return forbidden("Your role cannot manage categories.");
+      if (!can("settings.edit") && !can("blogs.create") && !can("blogs.edit"))
+        return forbidden("Your role cannot create categories.");
       const body = await request.json();
       const name = String(body.name || body.category || "").trim();
       if (!name)
@@ -1869,15 +2187,16 @@ async function handleRoute(request, { params }) {
             { status: 400 },
           ),
         );
-      await db.collection("workspace_config").updateOne(
-        { id: "default" },
-        { $addToSet: { categories: name } },
-        { upsert: true },
-      );
-      const options = await db.collection("workspace_config").findOne(
-        { id: "default" },
-        { projection: { categories: 1 } },
-      );
+      await db
+        .collection("workspace_config")
+        .updateOne(
+          { id: "default" },
+          { $addToSet: { categories: name } },
+          { upsert: true },
+        );
+      const options = await db
+        .collection("workspace_config")
+        .findOne({ id: "default" }, { projection: { categories: 1 } });
       return handleCORS(NextResponse.json({ categories: options.categories }));
     }
 
@@ -1888,9 +2207,14 @@ async function handleRoute(request, { params }) {
       const oldName = String(body.oldName || body.name || "").trim();
       if (!oldName)
         return handleCORS(
-          NextResponse.json({ error: "Category name is required" }, { status: 400 }),
+          NextResponse.json(
+            { error: "Category name is required" },
+            { status: 400 },
+          ),
         );
-      const config = await db.collection("workspace_config").findOne({ id: "default" });
+      const config = await db
+        .collection("workspace_config")
+        .findOne({ id: "default" });
       const categories = config?.categories || [];
       if (!categories.includes(oldName))
         return handleCORS(
@@ -1906,20 +2230,28 @@ async function handleRoute(request, { params }) {
             },
           },
         );
-        await db.collection("blogs").updateMany(
-          { category: oldName },
-          { $set: { category: "", subcategory: "" } },
-        );
+        await db
+          .collection("blogs")
+          .updateMany(
+            { category: oldName },
+            { $set: { category: "", subcategory: "" } },
+          );
         return handleCORS(NextResponse.json({ ok: true }));
       }
       const newName = String(body.newName || "").trim();
       if (!newName)
         return handleCORS(
-          NextResponse.json({ error: "New category name is required" }, { status: 400 }),
+          NextResponse.json(
+            { error: "New category name is required" },
+            { status: 400 },
+          ),
         );
       if (newName !== oldName && categories.includes(newName))
         return handleCORS(
-          NextResponse.json({ error: "Category already exists" }, { status: 400 }),
+          NextResponse.json(
+            { error: "Category already exists" },
+            { status: 400 },
+          ),
         );
       const relations = (config?.subcategoryRelations || []).map((item) =>
         item.category === oldName ? { ...item, category: newName } : item,
@@ -1928,21 +2260,22 @@ async function handleRoute(request, { params }) {
         { id: "default" },
         {
           $set: {
-            categories: categories.map((item) => (item === oldName ? newName : item)),
+            categories: categories.map((item) =>
+              item === oldName ? newName : item,
+            ),
             subcategoryRelations: relations,
           },
         },
       );
-      await db.collection("blogs").updateMany(
-        { category: oldName },
-        { $set: { category: newName } },
-      );
+      await db
+        .collection("blogs")
+        .updateMany({ category: oldName }, { $set: { category: newName } });
       return handleCORS(NextResponse.json({ ok: true, name: newName }));
     }
 
     if (route === "/subcategories" && method === "POST") {
-      if (!can("settings.edit"))
-        return forbidden("Your role cannot manage subcategories.");
+      if (!can("settings.edit") && !can("blogs.create") && !can("blogs.edit"))
+        return forbidden("Your role cannot create subcategories.");
       const body = await request.json();
       const name = String(body.name || body.subcategory || "").trim();
       const category = String(body.category || "").trim();
@@ -1956,15 +2289,15 @@ async function handleRoute(request, { params }) {
       const update = { $addToSet: { subcategories: name } };
       if (category)
         update.$addToSet.subcategoryRelations = { subcategory: name, category };
-      await db.collection("workspace_config").updateOne(
-        { id: "default" },
-        update,
-        { upsert: true },
-      );
-      const options = await db.collection("workspace_config").findOne(
-        { id: "default" },
-        { projection: { subcategories: 1, subcategoryRelations: 1 } },
-      );
+      await db
+        .collection("workspace_config")
+        .updateOne({ id: "default" }, update, { upsert: true });
+      const options = await db
+        .collection("workspace_config")
+        .findOne(
+          { id: "default" },
+          { projection: { subcategories: 1, subcategoryRelations: 1 } },
+        );
       return handleCORS(
         NextResponse.json({
           subcategories: options.subcategories || [],
@@ -2009,10 +2342,9 @@ async function handleRoute(request, { params }) {
             },
           },
         );
-        await db.collection("blogs").updateMany(
-          { subcategory: oldName },
-          { $set: { subcategory: "" } },
-        );
+        await db
+          .collection("blogs")
+          .updateMany({ subcategory: oldName }, { $set: { subcategory: "" } });
         return handleCORS(NextResponse.json({ ok: true }));
       }
       const newName = String(body.newName || "").trim();
@@ -2031,9 +2363,7 @@ async function handleRoute(request, { params }) {
           ),
         );
       const relations = (config?.subcategoryRelations || []).map((item) =>
-        item.subcategory === oldName
-          ? { ...item, subcategory: newName }
-          : item,
+        item.subcategory === oldName ? { ...item, subcategory: newName } : item,
       );
       await db.collection("workspace_config").updateOne(
         { id: "default" },
@@ -2046,10 +2376,12 @@ async function handleRoute(request, { params }) {
           },
         },
       );
-      await db.collection("blogs").updateMany(
-        { subcategory: oldName },
-        { $set: { subcategory: newName } },
-      );
+      await db
+        .collection("blogs")
+        .updateMany(
+          { subcategory: oldName },
+          { $set: { subcategory: newName } },
+        );
       return handleCORS(NextResponse.json({ ok: true, name: newName }));
     }
 
@@ -2301,7 +2633,10 @@ async function handleRoute(request, { params }) {
         .collection("blogs")
         .find({ status: { $ne: "archived" } })
         .toArray();
-      const allBlogs = await db.collection("blogs").find({}).toArray();
+      const allBlogs = await db
+        .collection("blogs")
+        .find({}, { projection: { slug: 1, id: 1 } })
+        .toArray();
       const media = await db.collection("media").find({}).toArray();
       const issues = [];
       const addIssue = (
@@ -2597,10 +2932,9 @@ async function handleRoute(request, { params }) {
     }
 
     if (route === "/categories" && method === "GET") {
-      const options = await db.collection("workspace_config").findOne(
-        { id: "default" },
-        { projection: { categories: 1 } },
-      );
+      const options = await db
+        .collection("workspace_config")
+        .findOne({ id: "default" }, { projection: { categories: 1 } });
       return handleCORS(
         NextResponse.json({ categories: options?.categories || [] }),
       );

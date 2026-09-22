@@ -18,6 +18,7 @@ import {
   Code2,
   Link2,
   Link2Off,
+  KeyRound,
   Image as ImageIcon,
   Table,
   Minus,
@@ -61,6 +62,8 @@ import {
   Plus,
   Hash,
   Search,
+  Send,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,10 +101,13 @@ import {
   api,
   fetcher,
   fmtNum,
+  fmtDate,
+  fmtDateTime,
   timeAgo,
   TIME_AGO_SHORT,
   TIMEZONES,
   STATUS_META,
+  getVinimayBlogUrl,
 } from "@/lib/client";
 import { analyzeSeo, slugify } from "@/lib/seo";
 import {
@@ -111,6 +117,10 @@ import {
   CharCount,
   CheckItem,
   ConfirmDialog,
+  RequestChangesDialog,
+  ReviewFeedbackAlert,
+  ScheduleDialog,
+  SearchableSelect,
 } from "../bits";
 
 // ---------- helpers ----------
@@ -203,6 +213,7 @@ const emptyForm = () => ({
   status: "draft",
   scheduledAt: null,
   publishedAt: null,
+  reviewFeedback: null,
 });
 
 // ---------- main ----------
@@ -212,6 +223,9 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const [form, setForm] = useState(emptyForm());
   const [loading, setLoading] = useState(isEdit);
   const [dirty, setDirty] = useState(false);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [reviewConfirmOpen, setReviewConfirmOpen] = useState(false);
+  const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
   const [tab, setTab] = useState("seo");
@@ -230,6 +244,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const [outlineLoading, setOutlineLoading] = useState(false);
   const [generatingMeta, setGeneratingMeta] = useState(false);
   const [imgBar, setImgBar] = useState(null); // selected img element info
+  const [linkBar, setLinkBar] = useState(null); // { el, href, text }
   const [highlight, setHighlight] = useState(null);
   const [seoSheetOpen, setSeoSheetOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -242,23 +257,131 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const { data: team } = useSWR("/api/team", fetcher);
   const { data: allBlogs } = useSWR("/api/blogs?limit=100", fetcher);
   const { data: keywords } = useSWR("/api/keywords", fetcher);
-  const { data: contentOptions } = useSWR("/api/content-options", fetcher);
-  const categories = contentOptions?.categories || [];
-  const subcategories = contentOptions?.subcategories || [];
+  const { data: contentOptions, mutate: mutateContentOptions } = useSWR(
+    "/api/content-options",
+    fetcher,
+  );
+  const categories = useMemo(() => {
+    const list = contentOptions?.categories || [];
+    if (form.category && !list.includes(form.category)) {
+      return [form.category, ...list];
+    }
+    return list;
+  }, [contentOptions?.categories, form.category]);
+
+  const subcategories = useMemo(() => {
+    const list = contentOptions?.subcategories || [];
+    if (form.subcategory && !list.includes(form.subcategory)) {
+      return [form.subcategory, ...list];
+    }
+    return list;
+  }, [contentOptions?.subcategories, form.subcategory]);
+
   const subcategoryRelations = contentOptions?.subcategoryRelations || [];
   const relatedSubcategories = useMemo(() => {
-    if (!form.category || !subcategoryRelations.length) return subcategories;
-    const related = subcategoryRelations
-      .filter((item) => item.category === form.category)
-      .map((item) => item.subcategory);
-    return related.length ? related : subcategories;
-  }, [form.category, subcategories, subcategoryRelations]);
+    let list = subcategories;
+    if (form.category && subcategoryRelations.length) {
+      const related = subcategoryRelations
+        .filter((item) => item.category === form.category)
+        .map((item) => item.subcategory);
+      if (related.length) list = related;
+    }
+    if (form.subcategory && !list.includes(form.subcategory)) {
+      list = [form.subcategory, ...list];
+    }
+    return list;
+  }, [form.category, form.subcategory, subcategories, subcategoryRelations]);
+
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [addCategoryLoading, setAddCategoryLoading] = useState(false);
+
+  const [addSubcategoryOpen, setAddSubcategoryOpen] = useState(false);
+  const [newSubcategoryName, setNewSubcategoryName] = useState("");
+  const [subcategoryParent, setSubcategoryParent] = useState("");
+  const [addSubcategoryLoading, setAddSubcategoryLoading] = useState(false);
+
+  async function handleCreateCategory() {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    setAddCategoryLoading(true);
+    try {
+      await api("/categories", {
+        method: "POST",
+        body: { name },
+      });
+      // 1. Immediately select newly created category in the form so it autofills instantly
+      up({ category: name, subcategory: "" });
+      // 2. Optimistically update SWR cache
+      await mutateContentOptions(
+        (curr) => ({
+          ...curr,
+          categories: Array.from(new Set([name, ...(curr?.categories || [])])),
+        }),
+        true,
+      );
+      setNewCategoryName("");
+      setAddCategoryOpen(false);
+      toast.success(`Category "${name}" created and selected`);
+    } catch (e) {
+      toast.error(e.message || "Failed to create category");
+    } finally {
+      setAddCategoryLoading(false);
+    }
+  }
+
+  async function handleCreateSubcategory() {
+    const name = newSubcategoryName.trim();
+    if (!name) return;
+    setAddSubcategoryLoading(true);
+    try {
+      const parentCat = subcategoryParent || form.category || "";
+      await api("/subcategories", {
+        method: "POST",
+        body: { name, category: parentCat },
+      });
+      // 1. Immediately select newly created subcategory in the form so it autofills instantly
+      const updates = { subcategory: name };
+      if (parentCat && form.category !== parentCat) {
+        updates.category = parentCat;
+      }
+      up(updates);
+      // 2. Optimistically update SWR cache
+      await mutateContentOptions((curr) => {
+        const relations = [...(curr?.subcategoryRelations || [])];
+        if (
+          parentCat &&
+          !relations.some(
+            (r) => r.subcategory === name && r.category === parentCat,
+          )
+        ) {
+          relations.push({ subcategory: name, category: parentCat });
+        }
+        return {
+          ...curr,
+          subcategories: Array.from(
+            new Set([name, ...(curr?.subcategories || [])]),
+          ),
+          subcategoryRelations: relations,
+        };
+      }, true);
+      setNewSubcategoryName("");
+      setAddSubcategoryOpen(false);
+      toast.success(`Subcategory "${name}" created and selected`);
+    } catch (e) {
+      toast.error(e.message || "Failed to create subcategory");
+    } finally {
+      setAddSubcategoryLoading(false);
+    }
+  }
 
   // Load blog
   useEffect(() => {
     if (!id) {
       setForm((f) => ({ ...f, author: user?.name || "" }));
       setLoading(false);
+      setDirty(false);
+      setHasChanges(false);
       return;
     }
     setLoading(true);
@@ -285,8 +408,11 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
           status: b.status,
           scheduledAt: b.scheduledAt,
           publishedAt: b.publishedAt,
+          reviewFeedback: b.reviewFeedback || null,
         });
         setLastSaved(b.updatedAt);
+        setDirty(false);
+        setHasChanges(false);
         if (focus) {
           const map = {
             meta: "meta",
@@ -336,9 +462,9 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   );
   const wc = analysis.stats.words;
 
-  // Autosave
+  // Autosave (only for drafts, not for published blogs to prevent accidental live changes)
   useEffect(() => {
-    if (!dirty || !id || saving) return;
+    if (!dirty || !id || saving || form.status === "published") return;
     const t = setTimeout(() => {
       save(true);
     }, 2500);
@@ -352,6 +478,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
       ...(typeof patch === "function" ? patch(f) : patch),
     }));
     setDirty(true);
+    setHasChanges(true);
   };
   const upSeo = (patch) => up((f) => ({ seo: { ...f.seo, ...patch } }));
 
@@ -384,6 +511,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         seo: { ...form.seo, metaTitle: form.seo.metaTitle || form.title },
         brief: form.brief,
         savedSuggestions: form.savedSuggestions,
+        publishedAt: form.publishedAt !== undefined ? form.publishedAt : null,
       };
       if (id) {
         const b = await api("/blogs/" + id, { method: "PUT", body: payload });
@@ -404,10 +532,12 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         return b.id;
       }
       setDirty(false);
-      if (!silent)
+      if (!silent) {
+        setHasChanges(false);
         toast.success(
           isEdit ? "Blog saved successfully" : "Draft created successfully",
         );
+      }
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -415,7 +545,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     }
   }
 
-  async function transition(to, scheduledAt) {
+  async function transition(to, scheduledAt, feedback) {
     const savedId = await save(true);
     const bid = savedId || idRef.current || id;
     if (!bid) {
@@ -425,17 +555,33 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     try {
       const b = await api("/blogs/" + bid + "/transition", {
         method: "POST",
-        body: { to, scheduledAt },
+        body: { to, scheduledAt, feedback },
       });
       up({
         status: b.status,
         scheduledAt: b.scheduledAt,
         publishedAt: b.publishedAt,
+        reviewFeedback: b.reviewFeedback || null,
       });
       setDirty(false);
+      setHasChanges(false);
       window.dispatchEvent(new Event("ss-refresh"));
       if (to === "published") {
-        toast.success("Blog published successfully 🎉");
+        const publishedSlug = b.slug || form.slug;
+        const liveUrl = getVinimayBlogUrl(publishedSlug);
+        toast.success(
+          form.status === "published"
+            ? "Blog updated & live changes saved! 🎉"
+            : "Blog published successfully 🎉",
+          {
+            description: "Your article is now live on Vinimay.",
+            action: {
+              label: "View on Vinimay ↗",
+              onClick: () => window.open(liveUrl, "_blank"),
+            },
+            duration: 9000,
+          },
+        );
       }
       if (to === "scheduled")
         toast.success(
@@ -443,6 +589,14 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
             (scheduledAt ? new Date(scheduledAt).toLocaleString() : "later"),
         );
       if (to === "in_review") toast.success("Submitted for SEO review");
+      if (to === "approved")
+        toast.success("Blog approved! Ready to schedule or publish 🎉");
+      if (to === "draft" && form.status === "in_review")
+        toast.success(
+          feedback
+            ? "Blog sent back to draft with revision feedback"
+            : "Blog moved back to draft for editing",
+        );
     } catch (e) {
       toast.error(e.message);
     }
@@ -470,6 +624,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
 
   function onEdit() {
     setDirty(true);
+    setHasChanges(true);
     setForm((f) => ({
       ...f,
       contentHtml: editorRef.current
@@ -512,8 +667,31 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     onEdit();
   }
 
-  // image selection inside editor
+  // image & link selection inside editor
   function handleEditorClick(e) {
+    // Handle clicking links
+    const a = e.target.closest && e.target.closest("a");
+    if (a && editorRef.current?.contains(a)) {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const href = a.getAttribute("href");
+        if (href) {
+          window.open(
+            href.startsWith("http") ? href : window.location.origin + href,
+            "_blank",
+          );
+        }
+        return;
+      }
+      setLinkBar({
+        el: a,
+        href: a.getAttribute("href") || "",
+        text: a.textContent || "",
+      });
+    } else {
+      setLinkBar(null);
+    }
+
     const img = e.target.closest && e.target.closest("img");
     if (editorRef.current)
       editorRef.current
@@ -587,7 +765,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
           url: c.url,
           storage: c.storage,
           publicId: c.publicId,
-          alt: form.featuredImage.alt || c.alt,
+          alt: form.featuredImage.alt || "",
           title: c.name,
           caption: "",
         },
@@ -597,47 +775,54 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   }
 
   async function optimizeFeatured(mode) {
-    const url = form.featuredImage.url;
-    const uploadedImage =
-      form.featuredImage.storage === "cloudinary" ||
-      url.startsWith("/uploads/");
-    if (!url || !uploadedImage) {
-      toast.error("Replace with an uploaded file first to optimize it");
+    const url = form.featuredImage?.url;
+    if (!url) {
+      toast.error("Please add or upload an image first");
       return;
     }
+    const toastId = toast.loading(
+      mode === "compress" ? "Compressing image..." : "Converting to WebP...",
+    );
     try {
-      const img = new Image();
-      img.src = url;
-      await new Promise((res, rej) => {
-        img.onload = res;
-        img.onerror = rej;
+      const res = await api("/media/optimize", {
+        method: "POST",
+        body: {
+          url,
+          mode,
+          filename:
+            form.featuredImage.title ||
+            form.featuredImage.alt ||
+            "featured-image",
+          alt: form.featuredImage.alt || "",
+          folder: "Featured Images",
+        },
       });
-      const canvas = document.createElement("canvas");
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      canvas.getContext("2d").drawImage(img, 0, 0);
-      const quality = mode === "compress" ? 0.72 : 0.85;
-      const blob = await new Promise((res) =>
-        canvas.toBlob(res, "image/webp", quality),
-      );
-      const file = new File(
-        [blob],
-        (form.featuredImage.title || "image").replace(/\.[^.]+$/, "") + ".webp",
-        { type: "image/webp" },
-      );
-      const created = await uploadFiles([file], "featured");
-      if (created.length) {
-        up({ featuredImage: { ...form.featuredImage, url: created[0].url } });
+      if (res && res.url) {
+        up({
+          featuredImage: {
+            ...form.featuredImage,
+            url: res.url,
+            storage: "cloudinary",
+            publicId: res.publicId,
+            format: "WEBP",
+            compressed: true,
+            size: res.size,
+          },
+        });
+        const kb = Math.round(res.size / 1024);
         toast.success(
           mode === "compress"
-            ? "Image compressed — new size " +
-                Math.round(blob.length / 1024) +
-                " KB"
-            : "Converted to WebP — " + Math.round(blob.length / 1024) + " KB",
+            ? `Image compressed — ${kb} KB ${
+                res.savedPercent > 0 ? `(${res.savedPercent}% saved)` : ""
+              }`
+            : `Converted to WebP — ${kb} KB`,
+          { id: toastId },
         );
+      } else {
+        throw new Error(res?.error || "Optimization failed");
       }
     } catch (e) {
-      toast.error("Could not process this image");
+      toast.error(e.message || "Could not process this image", { id: toastId });
     }
   }
 
@@ -717,7 +902,10 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         fix: () => {
           setChecklistOpen(false);
           setTimeout(() => {
-            editorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+            editorRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
             editorRef.current?.focus();
           }, 120);
         },
@@ -914,7 +1102,8 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
           ogTitle: res.metaTitle || form.seo.ogTitle,
           ogDescription: res.metaDescription || form.seo.ogDescription,
           twitterTitle: res.metaTitle || form.seo.twitterTitle,
-          twitterDescription: res.metaDescription || form.seo.twitterDescription,
+          twitterDescription:
+            res.metaDescription || form.seo.twitterDescription,
         });
         toast.success("SEO Metadata generated with Gemini AI!");
       }
@@ -1044,6 +1233,12 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
               >
                 {statusMeta.label}
               </Badge>
+              {form.status === "scheduled" && form.scheduledAt && (
+                <span className="text-[11px] font-medium text-violet-600 dark:text-violet-400 flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  {fmtDateTime(form.scheduledAt)}
+                </span>
+              )}
             </div>
             <p className="text-[11.5px] text-muted-foreground flex items-center gap-1.5">
               {saving ? (
@@ -1059,12 +1254,27 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
             <Button
               variant="outline"
               size="sm"
-              className="h-9"
+              className={`h-9 ${
+                form.status === "published" && !hasChanges && !dirty
+                  ? "opacity-50 cursor-not-allowed"
+                  : ""
+              }`}
               onClick={() => save(false)}
-              disabled={saving}
+              disabled={
+                saving || (form.status === "published" && !hasChanges && !dirty)
+              }
+              title={
+                form.status === "published" && !hasChanges && !dirty
+                  ? "All changes saved"
+                  : form.status === "draft"
+                    ? "Save Draft"
+                    : "Save Changes"
+              }
             >
               <Save className="h-4 w-4 mr-1.5" />{" "}
-              <span className="hidden sm:inline">Save Draft</span>
+              <span className="hidden sm:inline">
+                {form.status === "draft" ? "Save Draft" : "Save Changes"}
+              </span>
             </Button>
             <Button
               variant="outline"
@@ -1077,41 +1287,173 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
               <Eye className="h-4 w-4 mr-1.5" />{" "}
               <span className="hidden sm:inline">Preview</span>
             </Button>
-            {can("blogs.schedule") && form.status !== "published" && (
+            {form.status === "published" && form.slug && (
               <Button
                 variant="outline"
                 size="sm"
-                className="h-9"
-                onClick={() => setScheduleOpen(true)}
+                className="h-9 border-emerald-500/50 text-emerald-700 bg-emerald-50/70 hover:bg-emerald-100 hover:text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 gap-1.5 font-medium shadow-xs"
+                onClick={() => {
+                  window.open(getVinimayBlogUrl(form.slug), "_blank");
+                }}
+                title="View live blog on Vinimay in a new tab"
               >
-                <CalendarClock className="h-4 w-4 mr-1.5" />{" "}
-                <span className="hidden sm:inline">Schedule</span>
+                <ExternalLink className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                <span className="hidden sm:inline">View on Vinimay</span>
               </Button>
             )}
             {can("blogs.publish") ? (
-              <Button
-                size="sm"
-                className="h-9 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-md shadow-violet-500/25"
-                onClick={() => {
-                  setChecklistOpen(true);
-                }}
-              >
-                <Rocket className="h-4 w-4 mr-1.5" />{" "}
-                <span className="hidden sm:inline">Publish</span>
-              </Button>
-            ) : (
-              can("blogs.edit") &&
-              form.status === "draft" && (
+              <>
+                {form.status === "in_review" && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                      onClick={() => setRequestChangesOpen(true)}
+                      disabled={saving}
+                      title="Send back to draft for revisions"
+                    >
+                      <RotateCcw className="h-4 w-4 mr-1.5" />{" "}
+                      <span className="hidden sm:inline">Request changes</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-9 bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/25"
+                      onClick={() => transition("approved")}
+                      disabled={saving}
+                      title="Approve this blog for publishing"
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-1.5" />{" "}
+                      <span className="hidden sm:inline">Approve</span>
+                    </Button>
+                  </>
+                )}
+                {can("blogs.schedule") && form.status !== "published" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9"
+                    onClick={() => setScheduleOpen(true)}
+                  >
+                    <CalendarClock className="h-4 w-4 mr-1.5" />{" "}
+                    <span className="hidden sm:inline">Schedule</span>
+                  </Button>
+                )}
                 <Button
                   size="sm"
-                  className="h-9"
-                  onClick={() => transition("in_review")}
+                  className={`h-9 ${
+                    form.status === "published" && !hasChanges && !dirty
+                      ? "opacity-50 cursor-not-allowed bg-muted text-muted-foreground border border-border hover:bg-muted"
+                      : "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-md shadow-violet-500/25"
+                  }`}
+                  onClick={() => {
+                    if (form.status === "published" && !hasChanges && !dirty)
+                      return;
+                    setChecklistOpen(true);
+                  }}
+                  disabled={
+                    form.status === "published" && !hasChanges && !dirty
+                  }
+                  title={
+                    form.status === "published" && !hasChanges && !dirty
+                      ? "Blog is published and up to date"
+                      : form.status === "published"
+                        ? "Update published blog"
+                        : "Publish blog"
+                  }
                 >
-                  <ArrowLeft className="h-4 w-4 mr-1.5 rotate-180" /> Submit for
-                  review
+                  <Rocket className="h-4 w-4 mr-1.5" />{" "}
+                  <span className="hidden sm:inline">
+                    {form.status === "published" ? "Update" : "Publish"}
+                  </span>
+                </Button>
+              </>
+            ) : can("blogs.edit") ? (
+              form.status === "in_review" ? (
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className="h-9 px-3 border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-medium flex items-center gap-1.5"
+                  >
+                    <Clock className="h-3.5 w-3.5" /> In Review
+                  </Badge>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-9 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                    onClick={() => transition("draft")}
+                    disabled={saving}
+                    title="Withdraw this blog back to draft so you can continue editing"
+                  >
+                    <RotateCcw className="h-4 w-4 mr-1.5" />{" "}
+                    <span className="hidden sm:inline">
+                      {hasChanges || dirty
+                        ? "Save & Move to Draft"
+                        : "Withdraw to Draft"}
+                    </span>
+                  </Button>
+                </div>
+              ) : form.status === "approved" ? (
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className="h-9 px-3 border-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-medium flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />{" "}
+                    Approved
+                  </Badge>
+                  {(hasChanges || dirty) && (
+                    <Button
+                      size="sm"
+                      className="h-9 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-md shadow-violet-500/25"
+                      onClick={() => transition("in_review")}
+                      disabled={saving}
+                    >
+                      <Send className="h-4 w-4 mr-1.5" />{" "}
+                      <span className="hidden sm:inline">
+                        Resubmit for review
+                      </span>
+                    </Button>
+                  )}
+                </div>
+              ) : form.status === "draft" ? (
+                <Button
+                  size="sm"
+                  className="h-9 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-md shadow-violet-500/25"
+                  onClick={() => transition("in_review")}
+                  disabled={saving}
+                >
+                  <Send className="h-4 w-4 mr-1.5" />{" "}
+                  <span className="hidden sm:inline">Submit for review</span>
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  className={`h-9 ${
+                    hasChanges || dirty
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-md shadow-violet-500/25"
+                      : "opacity-45 bg-muted text-muted-foreground cursor-not-allowed border border-border hover:bg-muted"
+                  }`}
+                  onClick={() => {
+                    if (!hasChanges && !dirty) return;
+                    if (form.status === "published") {
+                      setReviewConfirmOpen(true);
+                    } else {
+                      transition("in_review");
+                    }
+                  }}
+                  disabled={saving || (!hasChanges && !dirty)}
+                  title={
+                    !hasChanges && !dirty
+                      ? "Make changes before submitting for review"
+                      : "Submit revised changes for review"
+                  }
+                >
+                  <Send className="h-4 w-4 mr-1.5" />{" "}
+                  <span className="hidden sm:inline">Submit for review</span>
                 </Button>
               )
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -1119,6 +1461,17 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
       <div className="flex">
         {/* Main column */}
         <div className="flex-1 min-w-0 px-4 lg:px-8 py-6 space-y-5 max-w-[860px] mx-auto xl:mx-0 xl:ml-[max(2rem,calc(50%-560px))]">
+          {/* Review Feedback Alert */}
+          {form.status === "draft" &&
+            form.reviewFeedback &&
+            !form.reviewFeedback.resolved && (
+              <ReviewFeedbackAlert
+                feedback={form.reviewFeedback}
+                canResubmit={can("blogs.edit")}
+                onResubmit={() => transition("in_review")}
+              />
+            )}
+
           {/* Blog information */}
           <Card
             id="info-card"
@@ -1163,7 +1516,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                   <span
                     className={
                       "font-medium " +
-                      (form.title.length >= 30 && form.title.length <= 65
+                      (form.title.length >= 30 && form.title.length <= 60
                         ? "text-emerald-600"
                         : "")
                     }
@@ -1171,7 +1524,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                     {form.title.length} characters
                   </span>
                   <span>·</span>
-                  <span>Ideal: 30–65 characters</span>
+                  <span>Ideal: 30–60 characters</span>
                 </div>
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
@@ -1221,10 +1574,11 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                     </SelectContent>
                   </Select>
                 </Labeled>
-                <Labeled label="Category" required>
-                  <Select
+                <Labeled label="Category" required htmlFor="f-category">
+                  <SearchableSelect
+                    id="f-category"
                     value={form.category || ""}
-                    onValueChange={(v) =>
+                    onChange={(v) =>
                       up({
                         category: v,
                         subcategory: relatedSubcategories.includes(
@@ -1234,35 +1588,42 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                           : "",
                       })
                     }
-                  >
-                    <SelectTrigger id="f-category" className="bg-muted/30">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={categories}
+                    placeholder="Select category"
+                    searchPlaceholder="Search category..."
+                    emptyText="No categories found."
+                    addNewLabel="Create category"
+                    onAddNew={(q) => {
+                      setNewCategoryName(q || "");
+                      setAddCategoryOpen(true);
+                    }}
+                  />
                 </Labeled>
-                <Labeled label="Subcategory">
-                  <Select
+
+                <Labeled label="Subcategory" htmlFor="f-subcategory">
+                  <SearchableSelect
+                    id="f-subcategory"
                     value={form.subcategory || ""}
-                    onValueChange={(v) => up({ subcategory: v })}
-                  >
-                    <SelectTrigger className="bg-muted/30">
-                      <SelectValue placeholder="Select subcategory" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {relatedSubcategories.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onChange={(v) => up({ subcategory: v })}
+                    options={relatedSubcategories}
+                    placeholder={
+                      form.category
+                        ? "Select subcategory"
+                        : "Select a category first"
+                    }
+                    searchPlaceholder="Search subcategory..."
+                    emptyText={
+                      form.category
+                        ? "No subcategories found."
+                        : "Please select a category first."
+                    }
+                    addNewLabel="Create subcategory"
+                    onAddNew={(q) => {
+                      setNewSubcategoryName(q || "");
+                      setSubcategoryParent(form.category || "");
+                      setAddSubcategoryOpen(true);
+                    }}
+                  />
                 </Labeled>
               </div>
 
@@ -1281,32 +1642,55 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                   required={!form.featuredImage.url}
                 >
                   {!form.featuredImage.url ? (
-                    <div
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        handleFeaturedFiles(e.dataTransfer.files);
-                      }}
-                      onClick={() => {
-                        fileMode.current = "featured";
-                        fileRef.current?.click();
-                      }}
-                      className="flex flex-col items-center justify-center gap-2.5 rounded-xl border-2 border-dashed border-violet-200 dark:border-violet-900 bg-violet-50/40 dark:bg-violet-950/20 py-10 cursor-pointer hover:border-violet-400 hover:bg-violet-50/70 transition-colors"
-                    >
-                      {uploading ? (
-                        <Loader2 className="h-7 w-7 text-violet-500 animate-spin" />
-                      ) : (
-                        <ImageIcon className="h-7 w-7 text-violet-400" />
-                      )}
-                      <p className="text-sm font-medium">
-                        Drag &amp; drop an image, or{" "}
-                        <span className="text-violet-600 underline">
-                          browse files
+                    <div className="space-y-2.5">
+                      <div
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          handleFeaturedFiles(e.dataTransfer.files);
+                        }}
+                        onClick={() => {
+                          fileMode.current = "featured";
+                          fileRef.current?.click();
+                        }}
+                        className="flex flex-col items-center justify-center gap-2.5 rounded-xl border-2 border-dashed border-violet-200 dark:border-violet-900 bg-violet-50/40 dark:bg-violet-950/20 py-8 cursor-pointer hover:border-violet-400 hover:bg-violet-50/70 transition-colors"
+                      >
+                        {uploading ? (
+                          <Loader2 className="h-7 w-7 text-violet-500 animate-spin" />
+                        ) : (
+                          <ImageIcon className="h-7 w-7 text-violet-400" />
+                        )}
+                        <p className="text-sm font-medium">
+                          Drag &amp; drop an image, or{" "}
+                          <span className="text-violet-600 underline">
+                            browse from device
+                          </span>
+                        </p>
+                        <p className="text-[11.5px] text-muted-foreground">
+                          Auto-converts to WebP (82% quality) · Max 2048px
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="h-px bg-border flex-1" />
+                        <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                          or choose existing
                         </span>
-                      </p>
-                      <p className="text-[11.5px] text-muted-foreground">
-                        PNG, JPG or WebP — up to 5MB
-                      </p>
+                        <div className="h-px bg-border flex-1" />
+                      </div>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full h-10 border-violet-200 dark:border-violet-900 hover:bg-violet-50 dark:hover:bg-violet-950/30 text-violet-700 dark:text-violet-300 font-medium"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPicker({ target: "pick-featured" });
+                        }}
+                      >
+                        <ImageIcon className="h-4 w-4 mr-2 text-violet-500" />
+                        Choose from Media Library
+                      </Button>
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -1316,7 +1700,17 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                           alt={form.featuredImage.alt}
                           className="w-full h-56 object-cover"
                         />
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              openPicker({ target: "pick-featured" })
+                            }
+                          >
+                            <ImageIcon className="h-4 w-4 mr-1.5 text-violet-500" />
+                            Library
+                          </Button>
                           <Button
                             size="sm"
                             variant="secondary"
@@ -1326,11 +1720,11 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                             }}
                           >
                             <Replace className="h-4 w-4 mr-1" />
-                            Replace
+                            Upload New
                           </Button>
                           <Button
                             size="sm"
-                            variant="secondary"
+                            variant="destructive"
                             onClick={() =>
                               up({
                                 featuredImage: {
@@ -1652,6 +2046,83 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 </div>
               )}
 
+              {/* Link options bar */}
+              {linkBar && (
+                <div className="mx-4 mt-2 rounded-lg border border-sky-200 bg-sky-50/90 dark:border-sky-900 dark:bg-sky-950/40 px-3 py-2 flex flex-wrap items-center gap-2 text-xs animate-in fade-in duration-150">
+                  <Link2 className="h-4 w-4 text-sky-500 shrink-0" />
+                  <span
+                    className="font-semibold text-foreground truncate max-w-[200px] sm:max-w-xs md:max-w-md"
+                    title={linkBar.href}
+                  >
+                    {linkBar.href}
+                  </span>
+                  <Separator orientation="vertical" className="h-4" />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-sky-700 hover:text-sky-800 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900/50"
+                    onClick={() => {
+                      window.open(
+                        linkBar.href.startsWith("http")
+                          ? linkBar.href
+                          : window.location.origin + linkBar.href,
+                        "_blank",
+                      );
+                    }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5 mr-1" />
+                    Open link ↗
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      setLinkDialog({
+                        url: linkBar.href,
+                        text: linkBar.text,
+                        newTab: linkBar.el.getAttribute("target") === "_blank",
+                      });
+                    }}
+                  >
+                    Edit link
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                    onClick={() => {
+                      const parent = linkBar.el.parentNode;
+                      if (parent) {
+                        while (linkBar.el.firstChild) {
+                          parent.insertBefore(
+                            linkBar.el.firstChild,
+                            linkBar.el,
+                          );
+                        }
+                        linkBar.el.remove();
+                      }
+                      setLinkBar(null);
+                      onEdit();
+                    }}
+                  >
+                    <Link2Off className="h-3.5 w-3.5 mr-1" />
+                    Unlink
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground hidden lg:inline ml-1">
+                    (or Ctrl + Click)
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs ml-auto"
+                    onClick={() => setLinkBar(null)}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
+
               <div
                 ref={editorRef}
                 className="editor-area prose-studio px-6 lg:px-8"
@@ -1831,15 +2302,26 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         onPick={(m) => {
           if (picker === "og") upSeo({ ogImage: m.url });
           else if (picker === "twitter") upSeo({ twitterImage: m.url });
-          else if (picker === "pick-featured")
+          else if (picker === "pick-featured") {
+            const isFilenameAlt =
+              m.alt && (m.alt === m.name || /^\w+-\d+/.test(m.alt));
+            const pickedAlt =
+              !isFilenameAlt && m.alt ? m.alt : form.featuredImage.alt || "";
             up({
               featuredImage: {
-                ...form.featuredImage,
                 url: m.url,
-                title: form.featuredImage.title || m.name,
-                alt: form.featuredImage.alt || m.alt,
+                title: m.name || form.featuredImage.title || "Featured image",
+                alt: pickedAlt,
+                caption: m.caption || form.featuredImage.caption || "",
+                storage: m.storage || "cloudinary",
+                publicId: m.publicId || "",
+                format: m.format || "WEBP",
+                size: m.size || 0,
+                compressed: m.compressed || m.format === "WEBP",
               },
             });
+            toast.success("Featured image selected from Media Library");
+          }
           setPicker(null);
         }}
       />
@@ -1915,7 +2397,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                   transition("published");
                 }}
               >
-                Publish now
+                {form.status === "published" ? "Update now" : "Publish now"}
               </Button>
             </div>
           </div>
@@ -1929,6 +2411,132 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         form={form}
         analysis={analysis}
       />
+
+      {/* Confirmation modal when submitting an already-published blog for review */}
+      <ConfirmDialog
+        open={reviewConfirmOpen}
+        onOpenChange={setReviewConfirmOpen}
+        title="Submit published blog for review?"
+        description="This blog is currently live on your website. Submitting it for review will change its status to 'In Review' until an admin reviews and re-publishes it. Do you want to submit your changes?"
+        confirmLabel="Yes, Submit for Review"
+        destructive={false}
+        onConfirm={() => {
+          setReviewConfirmOpen(false);
+          transition("in_review");
+        }}
+      />
+
+      {/* Request revisions modal */}
+      <RequestChangesDialog
+        open={requestChangesOpen}
+        onOpenChange={setRequestChangesOpen}
+        blogTitle={form.title}
+        loading={saving}
+        onConfirm={async (feedback) => {
+          setRequestChangesOpen(false);
+          await transition("draft", null, feedback);
+        }}
+      />
+
+      {/* Quick Add Category Dialog */}
+      <Dialog open={addCategoryOpen} onOpenChange={setAddCategoryOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add New Category</DialogTitle>
+            <DialogDescription>
+              Create a new category for your blogs.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Labeled label="Category name" required>
+              <Input
+                autoFocus
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="e.g. Invoicing, Taxes, Case Studies"
+                onKeyDown={(e) => e.key === "Enter" && handleCreateCategory()}
+              />
+            </Labeled>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setAddCategoryOpen(false)}
+              disabled={addCategoryLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
+              onClick={handleCreateCategory}
+              disabled={!newCategoryName.trim() || addCategoryLoading}
+            >
+              {addCategoryLoading ? "Creating..." : "Add Category"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Add Subcategory Dialog */}
+      <Dialog open={addSubcategoryOpen} onOpenChange={setAddSubcategoryOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add New Subcategory</DialogTitle>
+            <DialogDescription>
+              Create a new subcategory and associate it with a category.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Labeled label="Subcategory name" required>
+              <Input
+                autoFocus
+                value={newSubcategoryName}
+                onChange={(e) => setNewSubcategoryName(e.target.value)}
+                placeholder="e.g. GST Filing, Deductions"
+                onKeyDown={(e) =>
+                  e.key === "Enter" && handleCreateSubcategory()
+                }
+              />
+            </Labeled>
+            <Labeled
+              label="Parent Category (Optional)"
+              hint="Associate with category"
+            >
+              <Select
+                value={subcategoryParent}
+                onValueChange={setSubcategoryParent}
+              >
+                <SelectTrigger className="bg-muted/30">
+                  <SelectValue placeholder="Select parent category (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Labeled>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setAddSubcategoryOpen(false)}
+              disabled={addSubcategoryLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
+              onClick={handleCreateSubcategory}
+              disabled={!newSubcategoryName.trim() || addSubcategoryLoading}
+            >
+              {addSubcategoryLoading ? "Creating..." : "Add Subcategory"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1991,22 +2599,6 @@ function FeaturedMeta({ form, up, optimizeFeatured, setImgDialog }) {
         </Labeled>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => optimizeFeatured("webp")}
-        >
-          <Sparkles className="h-3.5 w-3.5 mr-1" />
-          Convert to WebP
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => optimizeFeatured("compress")}
-        >
-          <Gauge className="h-3.5 w-3.5 mr-1" />
-          Compress
-        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -2103,6 +2695,78 @@ function EditorRail({
             </div>
           </div>
 
+          {/* TARGET KEYWORDS SECTION (PROMINENT AT TOP) */}
+          <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-3 shadow-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <KeyRound className="h-4 w-4 text-violet-500" />
+                <span className="text-[12.5px] font-semibold tracking-tight">
+                  Target Keywords
+                </span>
+              </div>
+              <span className="text-[11px] text-muted-foreground font-medium">
+                Primary & Related
+              </span>
+            </div>
+
+            <Labeled label="Focus keyword" required hint="primary target">
+              <Input
+                id="f-focus-keyword"
+                value={form.seo.focusKeyword}
+                onChange={(e) => upSeo({ focusKeyword: e.target.value })}
+                placeholder="e.g. gst invoicing rules 2025"
+                className="bg-background"
+              />
+            </Labeled>
+
+            {kw && (
+              <div className="grid grid-cols-3 gap-2 pt-0.5">
+                {[
+                  ["Volume", fmtNum(kw.volume)],
+                  ["Difficulty", kw.difficulty + "/100"],
+                  ["Ranking", "#" + kw.position],
+                ].map(([l, v]) => (
+                  <div
+                    key={l}
+                    className="rounded-lg border border-border bg-background/80 px-2 py-1.5 text-center shadow-2xs"
+                  >
+                    <p className="text-[9.5px] uppercase tracking-wider text-muted-foreground font-medium">
+                      {l}
+                    </p>
+                    <p className="text-[13px] font-bold mt-0.5 text-foreground">
+                      {v}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {kw?.estimated && (
+              <p className="text-[10px] text-muted-foreground">
+                Estimated metrics — add this keyword in the Keyword Manager for
+                tracked data.
+              </p>
+            )}
+
+            <Labeled label="Related keywords" hint="Enter to add">
+              <ChipInput
+                value={form.seo.secondaryKeywords}
+                onChange={(secondaryKeywords) => upSeo({ secondaryKeywords })}
+                placeholder="secondary, long-tail, semantic…"
+              />
+            </Labeled>
+          </div>
+
+          {/* CHECKLIST HEADER */}
+          <div className="flex items-center justify-between pt-1">
+            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Live SEO Checklist
+            </p>
+            <span className="text-[11px] text-muted-foreground font-medium">
+              {analysis.checks.filter((c) => c.ok).length} of{" "}
+              {analysis.checks.length} passing
+            </span>
+          </div>
+
           <div className="space-y-1">
             {analysis.checks.map((c) => (
               <div
@@ -2139,48 +2803,6 @@ function EditorRail({
               </div>
             ))}
           </div>
-
-          <Separator />
-          <Labeled label="Focus keyword" required hint="primary target">
-            <Input
-              id="f-focus-keyword"
-              value={form.seo.focusKeyword}
-              onChange={(e) => upSeo({ focusKeyword: e.target.value })}
-              placeholder="Enter target keyword"
-            />
-          </Labeled>
-          {kw && (
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                ["Volume", fmtNum(kw.volume)],
-                ["Difficulty", kw.difficulty + "/100"],
-                ["Ranking", "#" + kw.position],
-              ].map(([l, v]) => (
-                <div
-                  key={l}
-                  className="rounded-lg border border-border bg-muted/30 px-2.5 py-2 text-center"
-                >
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {l}
-                  </p>
-                  <p className="text-sm font-bold mt-0.5">{v}</p>
-                </div>
-              ))}
-            </div>
-          )}
-          {kw?.estimated && (
-            <p className="text-[10.5px] text-muted-foreground">
-              Estimated metrics — add this keyword in the Keyword Manager for
-              tracked data.
-            </p>
-          )}
-          <Labeled label="Related keywords" hint="Enter to add">
-            <ChipInput
-              value={form.seo.secondaryKeywords}
-              onChange={(secondaryKeywords) => upSeo({ secondaryKeywords })}
-              placeholder="secondary, long-tail, semantic…"
-            />
-          </Labeled>
         </CardContent>
       )}
 
@@ -2280,6 +2902,78 @@ function EditorRail({
                 upSeo({ robots: { ...form.seo.robots, follow: v } })
               }
             />
+          </div>
+
+          <Separator />
+          <div className="rounded-lg border border-border/70 p-3 space-y-2 bg-muted/20">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[12.5px] font-semibold text-foreground">
+                  Publication Date
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Original publish timestamp displayed to Google & readers
+                </p>
+              </div>
+              <Badge variant="outline" className="text-[10px] font-normal">
+                {form.publishedAt ? "Custom / Set" : "Auto on publish"}
+              </Badge>
+            </div>
+            <Input
+              type="datetime-local"
+              value={
+                form.publishedAt
+                  ? new Date(
+                      new Date(form.publishedAt).getTime() -
+                        new Date().getTimezoneOffset() * 60000,
+                    )
+                      .toISOString()
+                      .slice(0, 16)
+                  : ""
+              }
+              onChange={(e) => {
+                const val = e.target.value
+                  ? new Date(e.target.value).toISOString()
+                  : null;
+                setForm((f) => ({ ...f, publishedAt: val }));
+                setDirty(true);
+              }}
+              className="text-xs bg-background"
+            />
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+              <span>
+                {form.publishedAt
+                  ? `Published: ${fmtDate(form.publishedAt)}`
+                  : "Will automatically set when published"}
+              </span>
+              <div className="flex items-center gap-2">
+                {form.publishedAt && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm((f) => ({ ...f, publishedAt: null }));
+                      setDirty(true);
+                    }}
+                    className="text-muted-foreground hover:text-foreground text-[11px]"
+                  >
+                    Reset to auto
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForm((f) => ({
+                      ...f,
+                      publishedAt: new Date().toISOString(),
+                    }));
+                    setDirty(true);
+                  }}
+                  className="text-violet-600 dark:text-violet-400 hover:underline font-medium text-[11px]"
+                >
+                  Set to now
+                </button>
+              </div>
+            </div>
           </div>
 
           <Separator />
@@ -2730,6 +3424,13 @@ function ImageDialog({ state, onClose, onUpload, onInsert, onApply }) {
   const [width, setWidth] = useState("100");
   const [align, setAlign] = useState("center");
   const [busy, setBusy] = useState(false);
+  const [libSearch, setLibSearch] = useState("");
+
+  const isEdit = state?.mode === "edit-image";
+  const { data: media, isLoading: libLoading } = useSWR(
+    !isEdit && state && mode === "library" ? "/api/media" : null,
+    fetcher,
+  );
 
   useEffect(() => {
     if (state) {
@@ -2739,11 +3440,22 @@ function ImageDialog({ state, onClose, onUpload, onInsert, onApply }) {
       setCaption(state.img?.caption || "");
       setWidth("100");
       setAlign("center");
+      setLibSearch("");
     }
   }, [state]);
 
   if (!state) return null;
-  const isEdit = state.mode === "edit-image";
+
+  const libImages = (media || [])
+    .filter((m) => !m.type || m.type === "image")
+    .filter((m) => {
+      if (!libSearch.trim()) return true;
+      const q = libSearch.toLowerCase();
+      return (
+        (m.name && m.name.toLowerCase().includes(q)) ||
+        (m.alt && m.alt.toLowerCase().includes(q))
+      );
+    });
 
   return (
     <Dialog open={!!state} onOpenChange={(o) => !o && onClose()}>
@@ -2755,19 +3467,16 @@ function ImageDialog({ state, onClose, onUpload, onInsert, onApply }) {
           <DialogDescription>
             {isEdit
               ? "Update alt text and caption for accessibility and SEO."
-              : "Upload a file or paste an image URL."}
+              : "Upload a file, choose from library, or paste an image URL."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3.5 py-1">
           {!isEdit && (
             <Tabs value={mode} onValueChange={setMode}>
-              <TabsList className="w-full">
-                <TabsTrigger value="url" className="w-full">
-                  Paste URL
-                </TabsTrigger>
-                <TabsTrigger value="upload" className="w-full">
-                  Upload
-                </TabsTrigger>
+              <TabsList className="w-full grid grid-cols-3">
+                <TabsTrigger value="url">Paste URL</TabsTrigger>
+                <TabsTrigger value="upload">Upload</TabsTrigger>
+                <TabsTrigger value="library">Library</TabsTrigger>
               </TabsList>
             </Tabs>
           )}
@@ -2796,13 +3505,72 @@ function ImageDialog({ state, onClose, onUpload, onInsert, onApply }) {
                   setBusy(false);
                   if (c) {
                     setUrl(c.url);
+                    setAlt(c.name?.replace(/\.[^.]+$/, "") || "");
                     setMode("url");
-                    toast.success("Image uploaded");
+                    toast.success("Image uploaded & auto-optimized to WebP");
                   }
                 }}
               />
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             </label>
+          )}
+          {!isEdit && mode === "library" && (
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={libSearch}
+                  onChange={(e) => setLibSearch(e.target.value)}
+                  placeholder="Search library images..."
+                  className="pl-8 h-8 text-xs"
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-2 max-h-[170px] overflow-y-auto p-1 border border-border rounded-lg bg-muted/20">
+                {libLoading ? (
+                  <div className="col-span-full py-8 text-center text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin mx-auto mb-1 text-violet-500" />
+                    Loading library...
+                  </div>
+                ) : libImages.length > 0 ? (
+                  libImages.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => {
+                        setUrl(m.url);
+                        setAlt(m.alt || m.name?.replace(/\.[^.]+$/, "") || "");
+                        setCaption(m.caption || "");
+                        toast.success("Selected from library");
+                      }}
+                      className={`group relative rounded-md overflow-hidden border text-left transition-all cursor-pointer ${
+                        url === m.url
+                          ? "ring-2 ring-violet-500 border-violet-500"
+                          : "border-border hover:border-violet-400"
+                      }`}
+                    >
+                      <img
+                        src={m.url}
+                        alt={m.alt || m.name}
+                        className="h-16 w-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                      <p className="text-[10px] truncate px-1 py-0.5 text-muted-foreground bg-background/90">
+                        {m.name}
+                      </p>
+                    </button>
+                  ))
+                ) : (
+                  <div className="col-span-full py-6 text-center text-xs text-muted-foreground">
+                    No images found in library
+                  </div>
+                )}
+              </div>
+              {url && (
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-400 truncate flex items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5 inline shrink-0" />
+                  Selected image ready
+                </p>
+              )}
+            </div>
           )}
           <Labeled label="Alt text" required>
             <Input
@@ -2873,118 +3641,110 @@ function ImageDialog({ state, onClose, onUpload, onInsert, onApply }) {
 
 // ---------- Media picker ----------
 function MediaPicker({ open, target, onClose, onPick }) {
-  const { data: media } = useSWR(open ? "/api/media" : null, fetcher);
+  const { data: media, isLoading } = useSWR(
+    open ? "/api/media" : null,
+    fetcher,
+  );
+  const [search, setSearch] = useState("");
+
+  const imageList = (media || [])
+    .filter((m) => !m.type || m.type === "image")
+    .filter((m) => {
+      if (!search.trim()) return true;
+      const q = search.toLowerCase();
+      return (
+        (m.name && m.name.toLowerCase().includes(q)) ||
+        (m.title && m.title.toLowerCase().includes(q)) ||
+        (m.alt && m.alt.toLowerCase().includes(q))
+      );
+    });
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Choose from Media Library</DialogTitle>
-          <DialogDescription>
-            Pick an existing asset instead of uploading a new one.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-h-[55vh] overflow-y-auto pt-1">
-          {(media || []).map((m) => (
-            <button
-              key={m.id}
-              onClick={() => onPick(m)}
-              className="group rounded-xl overflow-hidden border border-border hover:border-violet-400 transition-colors text-left"
-            >
-              <img
-                src={m.url}
-                alt={m.alt || m.name}
-                className="h-24 w-full object-cover group-hover:scale-[1.03] transition-transform"
-              />
-              <p className="text-[10px] truncate px-1.5 py-1 text-muted-foreground">
-                {m.name}
-              </p>
-            </button>
-          ))}
-          {(!media || media.length === 0) && (
-            <p className="col-span-full text-sm text-muted-foreground text-center py-8">
-              No media yet — upload images first.
-            </p>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------- Schedule dialog ----------
-function ScheduleDialog({ open, onOpenChange, form, onConfirm }) {
-  const [date, setDate] = useState("");
-  const [time, setTime] = useState("10:00");
-  const [tz, setTz] = useState("Asia/Kolkata");
-
-  useEffect(() => {
-    if (open) {
-      const existing = form.scheduledAt
-        ? new Date(form.scheduledAt)
-        : new Date(Date.now() + 86400000);
-      setDate(existing.toISOString().slice(0, 10));
-      setTime(existing.toISOString().slice(11, 16));
-    }
-  }, [open, form.scheduledAt]);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CalendarClock
-              className="h-4.5 w-4.5 text-violet-500"
-              style={{ width: 18, height: 18 }}
-            />
-            Schedule publish
+            <ImageIcon className="h-5 w-5 text-violet-500" />
+            Choose from Media Library
           </DialogTitle>
           <DialogDescription>
-            The blog will go live automatically at the chosen time.
+            {target === "pick-featured"
+              ? "Select an image from your library to set as Blog Featured Image."
+              : "Pick an existing asset instead of uploading a new one."}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3 py-1">
-          <Labeled label="Publish date" required>
-            <Input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-          </Labeled>
-          <Labeled label="Publish time" required>
-            <Input
-              type="time"
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-            />
-          </Labeled>
+
+        <div className="relative my-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search images by name or alt text..."
+            className="pl-9 h-9"
+          />
         </div>
-        <Labeled label="Timezone">
-          <Select value={tz} onValueChange={setTz}>
-            <SelectTrigger className="bg-muted/30">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TIMEZONES.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {t}
-                </SelectItem>
+
+        <div className="flex-1 overflow-y-auto min-h-[300px] max-h-[50vh] pr-1">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-violet-500" />
+              <span>Loading media library...</span>
+            </div>
+          ) : imageList.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {imageList.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => onPick(m)}
+                  className="group relative rounded-xl overflow-hidden border border-border hover:border-violet-500 hover:ring-2 hover:ring-violet-500/20 transition-all text-left bg-card cursor-pointer"
+                >
+                  <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
+                    <img
+                      src={m.url}
+                      alt={m.alt || m.name}
+                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
+                      loading="lazy"
+                    />
+                    {m.format && (
+                      <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-black/60 text-white backdrop-blur-xs uppercase">
+                        {m.format}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-2 space-y-0.5">
+                    <p className="text-xs font-medium truncate text-foreground group-hover:text-violet-600 transition-colors">
+                      {m.name || m.title || "image"}
+                    </p>
+                    {m.size ? (
+                      <p className="text-[10.5px] text-muted-foreground">
+                        {Math.round(m.size / 1024)} KB
+                      </p>
+                    ) : null}
+                  </div>
+                </button>
               ))}
-            </SelectContent>
-          </Select>
-        </Labeled>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <ImageIcon className="h-10 w-10 text-muted-foreground/40 mb-2" />
+              <p className="text-sm font-medium text-foreground">
+                {search
+                  ? "No matching images found"
+                  : "No images in library yet"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {search
+                  ? "Try searching for another keyword"
+                  : "Upload an image from your device to see it here."}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="border-t border-border pt-3">
+          <Button variant="outline" onClick={onClose}>
             Cancel
-          </Button>
-          <Button
-            className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
-            disabled={!date || !time}
-            onClick={() => {
-              onConfirm(new Date(date + "T" + time + ":00").toISOString(), tz);
-              onOpenChange(false);
-            }}
-          >
-            {form.status === "scheduled" ? "Update schedule" : "Schedule"}
           </Button>
         </DialogFooter>
       </DialogContent>

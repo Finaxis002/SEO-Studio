@@ -32,15 +32,29 @@ import { ConfirmDialog, Labeled } from "../bits";
 import { api, fetcher, initials } from "@/lib/client";
 import { useTheme } from "next-themes";
 
-export default function SettingsView({ tab: initialTab, user }) {
-  const [tab, setTab] = useState(initialTab || "general");
-  const { data: s, mutate } = useSWR("/api/settings", fetcher);
-  const { data: options } = useSWR("/api/settings-options", fetcher);
-  const { data: contentOptions, mutate: mutateContentOptions } = useSWR(
-    "/api/content-options",
+export default function SettingsView({
+  tab: initialTab,
+  user,
+  canManageSettings = true,
+}) {
+  const [tab, setTab] = useState(
+    canManageSettings ? initialTab || "general" : "profile",
+  );
+  const { data: s, mutate } = useSWR(
+    canManageSettings ? "/api/settings" : null,
     fetcher,
   );
-  const [form, setForm] = useState(null);
+  const { data: options } = useSWR(
+    canManageSettings ? "/api/settings-options" : null,
+    fetcher,
+  );
+  const { data: contentOptions, mutate: mutateContentOptions } = useSWR(
+    canManageSettings ? "/api/content-options" : null,
+    fetcher,
+  );
+  const [form, setForm] = useState(
+    canManageSettings ? null : { general: {}, seo: {}, publishing: {} },
+  );
   const [newCategory, setNewCategory] = useState("");
   const [newSubcategory, setNewSubcategory] = useState("");
   const [subcategoryCategory, setSubcategoryCategory] = useState("");
@@ -52,18 +66,18 @@ export default function SettingsView({ tab: initialTab, user }) {
   const { theme, setTheme } = useTheme();
 
   useEffect(() => {
-    setTab(initialTab || "general");
-  }, [initialTab]);
+    setTab(canManageSettings ? initialTab || "general" : "profile");
+  }, [initialTab, canManageSettings]);
   useEffect(() => {
-    if (s && !form)
+    if (s && !form && canManageSettings)
       setForm({
         general: s.general || {},
         seo: s.seo || {},
         publishing: s.publishing || {},
       });
-  }, [s]); // eslint-disable-line
+  }, [s, canManageSettings]); // eslint-disable-line
 
-  if (!form)
+  if (!form && canManageSettings && tab !== "profile")
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-72" />
@@ -132,7 +146,9 @@ export default function SettingsView({ tab: initialTab, user }) {
         body: { oldName, newName: newName.trim() },
       });
       mutateContentOptions();
-      toast.success(type === "category" ? "Category updated" : "Subcategory updated");
+      toast.success(
+        type === "category" ? "Category updated" : "Subcategory updated",
+      );
       if (type === "category") setEditingCategory(null);
       else setEditingSubcategory(null);
     } catch (e) {
@@ -147,7 +163,9 @@ export default function SettingsView({ tab: initialTab, user }) {
         body: { name },
       });
       mutateContentOptions();
-      toast.success(type === "category" ? "Category deleted" : "Subcategory deleted");
+      toast.success(
+        type === "category" ? "Category deleted" : "Subcategory deleted",
+      );
       setDeleteTarget(null);
     } catch (e) {
       toast.error(e.message);
@@ -157,34 +175,42 @@ export default function SettingsView({ tab: initialTab, user }) {
   return (
     <div className="space-y-4 animate-fade-up max-w-6xl">
       <div>
-        <h1 className="text-[22px] font-bold tracking-tight">Settings</h1>
+        <h1 className="text-[22px] font-bold tracking-tight">
+          {canManageSettings ? "Settings" : "Profile & Preferences"}
+        </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Workspace configuration and your profile.
+          {canManageSettings
+            ? "Workspace configuration and your profile."
+            : "Manage your personal account details and appearance."}
         </p>
       </div>
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="h-9 justify-start overflow-x-auto w-full bg-muted/60 p-1">
-          <TabsTrigger value="general" className="text-xs px-3 h-7">
-            General
-          </TabsTrigger>
-          <TabsTrigger value="seo" className="text-xs px-3 h-7">
-            SEO
-          </TabsTrigger>
-          <TabsTrigger value="publishing" className="text-xs px-3 h-7">
-            Publishing
-          </TabsTrigger>
-          <TabsTrigger value="profile" className="text-xs px-3 h-7">
-            Profile
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+      {canManageSettings && (
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className="h-9 justify-start overflow-x-auto w-full bg-muted/60 p-1">
+            <TabsTrigger value="general" className="text-xs px-3 h-7">
+              General
+            </TabsTrigger>
+            <TabsTrigger value="seo" className="text-xs px-3 h-7">
+              SEO
+            </TabsTrigger>
+            <TabsTrigger value="publishing" className="text-xs px-3 h-7">
+              Publishing
+            </TabsTrigger>
+            <TabsTrigger value="profile" className="text-xs px-3 h-7">
+              Profile
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
 
       <Dialog open={addCategoryOpen} onOpenChange={setAddCategoryOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add category</DialogTitle>
-            <DialogDescription>Add a category for the Blog Editor.</DialogDescription>
+            <DialogDescription>
+              Add a category for the Blog Editor.
+            </DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
@@ -194,7 +220,9 @@ export default function SettingsView({ tab: initialTab, user }) {
             onKeyDown={(e) => e.key === "Enter" && addCategory()}
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddCategoryOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setAddCategoryOpen(false)}>
+              Cancel
+            </Button>
             <Button onClick={addCategory}>Add category</Button>
           </DialogFooter>
         </DialogContent>
@@ -204,7 +232,9 @@ export default function SettingsView({ tab: initialTab, user }) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add subcategory</DialogTitle>
-            <DialogDescription>Optionally associate this subcategory with a category.</DialogDescription>
+            <DialogDescription>
+              Optionally associate this subcategory with a category.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Input
@@ -214,56 +244,126 @@ export default function SettingsView({ tab: initialTab, user }) {
               placeholder="Subcategory name"
               onKeyDown={(e) => e.key === "Enter" && addSubcategory()}
             />
-            <Select value={subcategoryCategory} onValueChange={setSubcategoryCategory}>
-              <SelectTrigger className="bg-muted/30"><SelectValue placeholder="Category (optional)" /></SelectTrigger>
+            <Select
+              value={subcategoryCategory}
+              onValueChange={setSubcategoryCategory}
+            >
+              <SelectTrigger className="bg-muted/30">
+                <SelectValue placeholder="Category (optional)" />
+              </SelectTrigger>
               <SelectContent>
                 {(contentOptions?.categories || []).map((category) => (
-                  <SelectItem key={category} value={category}>{category}</SelectItem>
+                  <SelectItem key={category} value={category}>
+                    {category}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddSubcategoryOpen(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => setAddSubcategoryOpen(false)}
+            >
+              Cancel
+            </Button>
             <Button onClick={addSubcategory}>Add subcategory</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!editingCategory} onOpenChange={(open) => !open && setEditingCategory(null)}>
+      <Dialog
+        open={!!editingCategory}
+        onOpenChange={(open) => !open && setEditingCategory(null)}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit category</DialogTitle>
-            <DialogDescription>Rename this category across the workspace.</DialogDescription>
+            <DialogDescription>
+              Rename this category across the workspace.
+            </DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
             value={editingCategory?.name || ""}
-            onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
-            onKeyDown={(e) => e.key === "Enter" && updateContentOption("category", editingCategory.oldName, editingCategory.name)}
+            onChange={(e) =>
+              setEditingCategory({ ...editingCategory, name: e.target.value })
+            }
+            onKeyDown={(e) =>
+              e.key === "Enter" &&
+              updateContentOption(
+                "category",
+                editingCategory.oldName,
+                editingCategory.name,
+              )
+            }
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingCategory(null)}>Cancel</Button>
-            <Button onClick={() => updateContentOption("category", editingCategory.oldName, editingCategory.name)}>Save changes</Button>
+            <Button variant="outline" onClick={() => setEditingCategory(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                updateContentOption(
+                  "category",
+                  editingCategory.oldName,
+                  editingCategory.name,
+                )
+              }
+            >
+              Save changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!editingSubcategory} onOpenChange={(open) => !open && setEditingSubcategory(null)}>
+      <Dialog
+        open={!!editingSubcategory}
+        onOpenChange={(open) => !open && setEditingSubcategory(null)}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit subcategory</DialogTitle>
-            <DialogDescription>Rename this subcategory across the workspace.</DialogDescription>
+            <DialogDescription>
+              Rename this subcategory across the workspace.
+            </DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
             value={editingSubcategory?.name || ""}
-            onChange={(e) => setEditingSubcategory({ ...editingSubcategory, name: e.target.value })}
-            onKeyDown={(e) => e.key === "Enter" && updateContentOption("subcategory", editingSubcategory.oldName, editingSubcategory.name)}
+            onChange={(e) =>
+              setEditingSubcategory({
+                ...editingSubcategory,
+                name: e.target.value,
+              })
+            }
+            onKeyDown={(e) =>
+              e.key === "Enter" &&
+              updateContentOption(
+                "subcategory",
+                editingSubcategory.oldName,
+                editingSubcategory.name,
+              )
+            }
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingSubcategory(null)}>Cancel</Button>
-            <Button onClick={() => updateContentOption("subcategory", editingSubcategory.oldName, editingSubcategory.name)}>Save changes</Button>
+            <Button
+              variant="outline"
+              onClick={() => setEditingSubcategory(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                updateContentOption(
+                  "subcategory",
+                  editingSubcategory.oldName,
+                  editingSubcategory.name,
+                )
+              }
+            >
+              Save changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -272,9 +372,7 @@ export default function SettingsView({ tab: initialTab, user }) {
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={
-          deleteTarget
-            ? "Delete " + deleteTarget.type + "?"
-            : "Delete item?"
+          deleteTarget ? "Delete " + deleteTarget.type + "?" : "Delete item?"
         }
         description={
           deleteTarget
@@ -347,111 +445,168 @@ export default function SettingsView({ tab: initialTab, user }) {
               <Save className="h-4 w-4 mr-1.5" />
               Save changes
             </Button>
-
-            
           </CardContent>
         </Card>
       )}
 
       {tab === "seo" && (
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] gap-4 items-start">
-        <Card className="card-hover">
-          <CardContent className="p-5 space-y-4">
-            <Labeled
-              label="Default meta title template"
-              hint="use {title} placeholder"
-            >
-              <Input
-                value={form.seo.defaultMetaTitle || ""}
-                onChange={(e) => upS("defaultMetaTitle", e.target.value)}
-                placeholder="{title} — SEO Studio"
-              />
-            </Labeled>
-            <Labeled label="Default meta description">
-              <Textarea
-                rows={2}
-                value={form.seo.defaultMetaDescription || ""}
-                onChange={(e) => upS("defaultMetaDescription", e.target.value)}
-              />
-            </Labeled>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
-                <div>
-                  <p className="text-[13px] font-medium">XML sitemap</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Automatically include blogs in sitemap.xml
-                  </p>
-                </div>
-                <Switch
-                  checked={!!form.seo.sitemapEnabled}
-                  onCheckedChange={(v) => upS("sitemapEnabled", v)}
+          <Card className="card-hover">
+            <CardContent className="p-5 space-y-4">
+              <Labeled
+                label="Default meta title template"
+                hint="use {title} placeholder"
+              >
+                <Input
+                  value={form.seo.defaultMetaTitle || ""}
+                  onChange={(e) => upS("defaultMetaTitle", e.target.value)}
+                  placeholder="{title} — SEO Studio"
                 />
-              </div>
-              <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
-                <div>
-                  <p className="text-[13px] font-medium">
-                    Google Search Console verified
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {form.seo.gscProperty ||
-                      "Connected via Google Service Account"}
-                  </p>
-                </div>
-                <Switch
-                  checked={!!form.seo.gscVerified}
-                  onCheckedChange={(v) => upS("gscVerified", v)}
+              </Labeled>
+              <Labeled label="Default meta description">
+                <Textarea
+                  rows={2}
+                  value={form.seo.defaultMetaDescription || ""}
+                  onChange={(e) =>
+                    upS("defaultMetaDescription", e.target.value)
+                  }
                 />
+              </Labeled>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+                  <div>
+                    <p className="text-[13px] font-medium">XML sitemap</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Automatically include blogs in sitemap.xml
+                    </p>
+                  </div>
+                  <Switch
+                    checked={!!form.seo.sitemapEnabled}
+                    onCheckedChange={(v) => upS("sitemapEnabled", v)}
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+                  <div>
+                    <p className="text-[13px] font-medium">
+                      Google Search Console verified
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {form.seo.gscProperty ||
+                        "Connected via Google Service Account"}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={!!form.seo.gscVerified}
+                    onCheckedChange={(v) => upS("gscVerified", v)}
+                  />
+                </div>
               </div>
-            </div>
-            <Labeled label="robots.txt">
-              <Textarea
-                rows={4}
-                value={form.seo.robotsTxt || ""}
-                onChange={(e) => upS("robotsTxt", e.target.value)}
-                className="font-mono text-[12.5px]"
-              />
-            </Labeled>
-            <Button
-              onClick={() => save("SEO")}
-              className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
-            >
-              <Save className="h-4 w-4 mr-1.5" />
-              Save changes
-            </Button>
-          </CardContent>
-        </Card>
-        <Card className="card-hover">
-          <CardContent className="p-5 space-y-3">
-            <div>
-              <p className="text-[13px] font-medium">Content categories</p>
-  
-            </div>
-            <Button variant="outline" onClick={() => setAddCategoryOpen(true)}>
-              Add category
-            </Button>
-            <div className="flex flex-wrap gap-1.5">
-              {(contentOptions?.categories || []).map((category) => (
-                <div key={category} className="flex items-center gap-1 rounded-md border px-2 py-1">
-                    <Badge variant="outline" className="border-0 px-0">{category}</Badge>
-                    <button type="button" title="Edit category" onClick={() => setEditingCategory({ oldName: category, name: category })}><Pencil className="h-3 w-3 text-muted-foreground" /></button>
-                    <button type="button" title="Delete category" onClick={() => setDeleteTarget({ type: "category", name: category })}><Trash2 className="h-3 w-3 text-red-600" /></button>
-                </div>
-              ))}
-            </div>
-            <Button variant="outline" className="w-full" onClick={() => setAddSubcategoryOpen(true)}>
-              Add subcategory
-            </Button>
-            <div className="flex flex-wrap gap-1.5">
-              {(contentOptions?.subcategories || []).map((subcategory) => (
-                <div key={subcategory} className="flex items-center gap-1 rounded-md border px-2 py-1">
-                  <Badge variant="outline" className="border-0 px-0">{subcategory}</Badge>
-                  <button type="button" title="Edit subcategory" onClick={() => setEditingSubcategory({ oldName: subcategory, name: subcategory })}><Pencil className="h-3 w-3 text-muted-foreground" /></button>
-                  <button type="button" title="Delete subcategory" onClick={() => setDeleteTarget({ type: "subcategory", name: subcategory })}><Trash2 className="h-3 w-3 text-red-600" /></button>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              <Labeled label="robots.txt">
+                <Textarea
+                  rows={4}
+                  value={form.seo.robotsTxt || ""}
+                  onChange={(e) => upS("robotsTxt", e.target.value)}
+                  className="font-mono text-[12.5px]"
+                />
+              </Labeled>
+              <Button
+                onClick={() => save("SEO")}
+                className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
+              >
+                <Save className="h-4 w-4 mr-1.5" />
+                Save changes
+              </Button>
+            </CardContent>
+          </Card>
+          <Card className="card-hover">
+            <CardContent className="p-5 space-y-3">
+              <div>
+                <p className="text-[13px] font-medium">Content categories</p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => setAddCategoryOpen(true)}
+              >
+                Add category
+              </Button>
+              <div className="flex flex-wrap gap-1.5">
+                {(contentOptions?.categories || []).map((category) => (
+                  <div
+                    key={category}
+                    className="flex items-center gap-1 rounded-md border px-2 py-1"
+                  >
+                    <Badge variant="outline" className="border-0 px-0">
+                      {category}
+                    </Badge>
+                    <button
+                      type="button"
+                      title="Edit category"
+                      onClick={() =>
+                        setEditingCategory({
+                          oldName: category,
+                          name: category,
+                        })
+                      }
+                    >
+                      <Pencil className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete category"
+                      onClick={() =>
+                        setDeleteTarget({ type: "category", name: category })
+                      }
+                    >
+                      <Trash2 className="h-3 w-3 text-red-600" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setAddSubcategoryOpen(true)}
+              >
+                Add subcategory
+              </Button>
+              <div className="flex flex-wrap gap-1.5">
+                {(contentOptions?.subcategories || []).map((subcategory) => (
+                  <div
+                    key={subcategory}
+                    className="flex items-center gap-1 rounded-md border px-2 py-1"
+                  >
+                    <Badge variant="outline" className="border-0 px-0">
+                      {subcategory}
+                    </Badge>
+                    <button
+                      type="button"
+                      title="Edit subcategory"
+                      onClick={() =>
+                        setEditingSubcategory({
+                          oldName: subcategory,
+                          name: subcategory,
+                        })
+                      }
+                    >
+                      <Pencil className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete subcategory"
+                      onClick={() =>
+                        setDeleteTarget({
+                          type: "subcategory",
+                          name: subcategory,
+                        })
+                      }
+                    >
+                      <Trash2 className="h-3 w-3 text-red-600" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 

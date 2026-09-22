@@ -10,11 +10,19 @@ import {
   Images,
   Menu,
   Loader2,
+  ShieldAlert,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { EmptyState } from "@/components/bits";
 import { fetcher } from "@/lib/client";
 import Sidebar, { navTitle } from "@/components/Sidebar";
 import Header from "@/components/Header";
@@ -45,7 +53,8 @@ dayjs.extend(relativeTime);
 function readViewFromLocation() {
   const segments = window.location.pathname.split("/").filter(Boolean);
   const params = new URLSearchParams(window.location.search);
-  const name = segments[0] === "dashboard" ? segments[1] || "dashboard" : "dashboard";
+  const name =
+    segments[0] === "dashboard" ? segments[1] || "dashboard" : "dashboard";
   const viewParams = {};
   params.forEach((value, key) => {
     viewParams[key] = value;
@@ -127,14 +136,17 @@ export default function App() {
   }, []);
 
   // Permissions
-  const role = roles ? (roles || []).find((r) => r.name === user?.role) : null;
+  const roleList = Array.isArray(roles) ? roles : [];
+  const role = user?.role
+    ? roleList.find((r) => r.name === user?.role) || null
+    : null;
   const can = useCallback(
     (perm) => {
       if (user?.role === "Super Admin") return true;
-      if (!roles || !role) return false;
-      return (role.permissions || []).includes(perm);
+      const perms = role?.permissions || user?.permissions || [];
+      return Array.isArray(perms) && perms.includes(perm);
     },
-    [roles, role, user?.role],
+    [role, user?.role, user?.permissions],
   );
 
   // Keyboard shortcuts
@@ -209,12 +221,33 @@ export default function App() {
       />
     );
 
+  const accessDenied = (
+    msg = "Your role does not have permission to access this page.",
+  ) => (
+    <div className="p-6 max-w-xl mx-auto my-12">
+      <EmptyState
+        icon={ShieldAlert}
+        title="Access Denied"
+        description={msg}
+        action={
+          <Button onClick={() => navigate("dashboard", {})}>
+            Back to Dashboard
+          </Button>
+        }
+      />
+    </div>
+  );
+
   const renderView = () => {
     const p = view.params || {};
     switch (view.name) {
       case "dashboard":
         return <Dashboard user={user} navigate={navigate} can={can} />;
       case "blogs":
+        if (!can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view blogs.",
+          );
         return (
           <Blogs
             statusFilter={p.status || null}
@@ -223,18 +256,46 @@ export default function App() {
           />
         );
       case "drafts":
+        if (!can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view drafts.",
+          );
         return <Blogs statusFilter="draft" navigate={navigate} can={can} />;
       case "scheduled":
+        if (!can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view scheduled blogs.",
+          );
         return <Blogs statusFilter="scheduled" navigate={navigate} can={can} />;
       case "schedule":
+        if (!can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view the publishing calendar.",
+          );
         return <ScheduleView navigate={navigate} can={can} />;
       case "published":
+        if (!can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view published blogs.",
+          );
         return <Blogs statusFilter="published" navigate={navigate} can={can} />;
       case "archived":
+        if (!can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view archived blogs.",
+          );
         return <Blogs statusFilter="archived" navigate={navigate} can={can} />;
       case "blog":
+        if (!can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view blog details.",
+          );
         return <BlogDetail blogId={p.id} navigate={navigate} can={can} />;
       case "media":
+        if (!can("media.view"))
+          return accessDenied(
+            "Your role does not have permission to view the media library.",
+          );
         return (
           <Media
             navigate={navigate}
@@ -244,23 +305,64 @@ export default function App() {
           />
         );
       case "seo-overview":
+        if (!can("seo.view"))
+          return accessDenied(
+            "Your role does not have permission to view SEO overview.",
+          );
         return <SeoOverview navigate={navigate} />;
       case "issues":
+        if (!can("seo.issues.view"))
+          return accessDenied(
+            "Your role does not have permission to view SEO issues.",
+          );
         return <SeoIssues navigate={navigate} />;
       case "optimization":
+        if (!can("seo.view"))
+          return accessDenied(
+            "Your role does not have permission to view content optimization.",
+          );
         return <ContentOptimization navigate={navigate} />;
       case "keywords":
+        if (!can("seo.view"))
+          return accessDenied(
+            "Your role does not have permission to view keywords.",
+          );
         return <Keywords navigate={navigate} can={can} />;
       case "analytics":
+        if (!can("analytics.view"))
+          return accessDenied(
+            "Your role does not have permission to view analytics.",
+          );
         return <AnalyticsView initialTab={p.tab} key={p.tab} />;
       case "team":
+        if (!can("team.view"))
+          return accessDenied(
+            "Your role does not have permission to view team members.",
+          );
         return <Team user={user} can={can} />;
       case "roles":
+        if (!can("team.roles"))
+          return accessDenied(
+            "Your role does not have permission to manage roles.",
+          );
         return <Roles can={can} />;
       case "activity":
+        if (!can("team.view"))
+          return accessDenied(
+            "Your role does not have permission to view activity logs.",
+          );
         return <ActivityView />;
-      case "settings":
-        return <SettingsView tab={p.tab} user={user} />;
+      case "settings": {
+        const hasSettingsPerm = can("settings.view");
+        const requestedTab = p.tab || (hasSettingsPerm ? "general" : "profile");
+        return (
+          <SettingsView
+            tab={hasSettingsPerm ? requestedTab : "profile"}
+            user={user}
+            canManageSettings={hasSettingsPerm}
+          />
+        );
+      }
       default:
         return <Dashboard user={user} navigate={navigate} can={can} />;
     }
@@ -268,6 +370,17 @@ export default function App() {
 
   // Full-screen editor
   if (view.name === "editor") {
+    const isNew = !view.params?.id;
+    if (isNew && !can("blogs.create")) {
+      return accessDenied(
+        "Your role does not have permission to create blogs.",
+      );
+    }
+    if (!isNew && !can("blogs.edit") && !can("blogs.view")) {
+      return accessDenied(
+        "Your role does not have permission to edit or view this blog.",
+      );
+    }
     return (
       <BlogEditor
         blogId={view.params?.id || null}

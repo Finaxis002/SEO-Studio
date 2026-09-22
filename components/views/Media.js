@@ -168,62 +168,51 @@ export default function Media({ navigate, can, initialUpload }) {
   }
 
   async function convertToWebP(m) {
-    if (m.storage !== "cloudinary" && !m.url.startsWith("/uploads/")) {
-      toast.error("Only uploaded files can be converted");
+    if (!m?.url) {
+      toast.error("Invalid media item");
       return;
     }
+    const toastId = toast.loading("Converting to WebP...");
     try {
-      const img = new Image();
-      img.src = m.url;
-      await new Promise((res, rej) => {
-        img.onload = res;
-        img.onerror = rej;
-      });
-      const canvas = document.createElement("canvas");
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      canvas.getContext("2d").drawImage(img, 0, 0);
-      const blob = await new Promise((res) =>
-        canvas.toBlob(res, "image/webp", 0.85),
-      );
-      const file = new File([blob], m.name.replace(/\.[^.]+$/, "") + ".webp", {
-        type: "image/webp",
-      });
-      const fd = new FormData();
-      fd.append("files", file);
-      fd.append("folder", m.folder);
-      fd.append("alt", m.alt || "");
-      fd.append("title", m.name);
-      const created = await api("/upload", {
+      const res = await api("/media/optimize", {
         method: "POST",
-        body: fd,
-        raw: true,
-      });
-      await api("/media/" + m.id, {
-        method: "PUT",
         body: {
-          url: created[0].url,
-          publicId: created[0].publicId,
-          storage: created[0].storage,
-          size: created[0].size,
-          format: "WEBP",
-          compressed: true,
-          name: file.name,
+          url: m.url,
+          mode: "webp",
+          filename: m.name,
+          alt: m.alt || m.name,
+          folder: m.folder || "Blog Images",
         },
       });
-      toast.success(
-        "Converted to WebP — " + Math.round(blob.length / 1024) + " KB",
-      );
-      mutate();
-      if (selected?.id === m.id)
-        setSelected({
-          ...m,
-          url: created[0].url,
-          size: created[0].size,
-          format: "WEBP",
+      if (res && res.url) {
+        await api("/media/" + m.id, {
+          method: "PUT",
+          body: {
+            url: res.url,
+            publicId: res.publicId,
+            storage: res.storage || "cloudinary",
+            size: res.size,
+            format: "WEBP",
+            compressed: true,
+          },
         });
+        toast.success(`Converted to WebP — ${Math.round(res.size / 1024)} KB`, {
+          id: toastId,
+        });
+        mutate();
+        if (selected?.id === m.id)
+          setSelected({
+            ...m,
+            url: res.url,
+            size: res.size,
+            format: "WEBP",
+            compressed: true,
+          });
+      } else {
+        throw new Error(res?.error || "Conversion failed");
+      }
     } catch (e) {
-      toast.error("Conversion failed");
+      toast.error(e.message || "Conversion failed", { id: toastId });
     }
   }
 
@@ -710,12 +699,15 @@ function MediaDrawer({
             Replace
           </Button>
         )}
-        {can("media.edit") && (
-          <Button size="sm" variant="outline" onClick={onConvert}>
-            <Sparkles className="h-3.5 w-3.5 mr-1" />
-            Convert to WebP
-          </Button>
-        )}
+        {can("media.edit") &&
+          m.format !== "WEBP" &&
+          !m.name?.endsWith(".webp") &&
+          !m.url?.endsWith(".webp") && (
+            <Button size="sm" variant="outline" onClick={onConvert}>
+              <Sparkles className="h-3.5 w-3.5 mr-1" />
+              Convert to WebP
+            </Button>
+          )}
         <Button
           size="sm"
           variant="outline"
