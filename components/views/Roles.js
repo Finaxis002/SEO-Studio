@@ -38,8 +38,8 @@ export default function Roles({ can }) {
   const [nr, setNr] = useState({ name: "", description: "", permissions: [] });
   const [confirmDel, setConfirmDel] = useState(null);
 
-  const selected =
-    (roles || []).find((r) => r.id === selectedId) || (roles || [])[0];
+  const roleList = Array.isArray(roles) ? roles : [];
+  const selected = roleList.find((r) => r.id === selectedId) || roleList[0];
 
   useEffect(() => {
     if (selected && selected.id !== selectedId) setSelectedId(selected.id);

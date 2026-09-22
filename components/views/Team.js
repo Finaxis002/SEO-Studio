@@ -65,7 +65,9 @@ export default function Team({ user, can }) {
     password: "",
   });
   const [viewMember, setViewMember] = useState(null);
-  const roleOptions = (roles || []).map((role) => role.name);
+  const roleOptions = (Array.isArray(roles) ? roles : []).map(
+    (role) => role.name,
+  );
   const departmentOptions = teamOptions?.departments || [];
 
   useEffect(() => {

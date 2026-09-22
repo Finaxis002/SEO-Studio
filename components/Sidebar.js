@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import {
   LayoutDashboard,
@@ -27,18 +27,18 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Sparkles,
-} from "lucide-react"
+} from "lucide-react";
 
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip"
+} from "@/components/ui/tooltip";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { initials } from "@/lib/client"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { initials } from "@/lib/client";
 
 export const NAV = [
   {
@@ -59,6 +59,7 @@ export const NAV = [
         label: "All Blogs",
         icon: FileText,
         badge: "all",
+        perm: "blogs.view",
       },
       {
         key: "create",
@@ -74,6 +75,7 @@ export const NAV = [
         key: "drafts",
         label: "Drafts",
         icon: FileEdit,
+        perm: "blogs.view",
         params: {
           status: "draft",
         },
@@ -83,6 +85,7 @@ export const NAV = [
         key: "scheduled",
         label: "Scheduled",
         icon: CalendarClock,
+        perm: "blogs.view",
         params: {
           status: "scheduled",
         },
@@ -92,6 +95,7 @@ export const NAV = [
         key: "schedule",
         label: "Publishing Calendar",
         icon: CalendarDays,
+        perm: "blogs.view",
         view: {
           name: "schedule",
         },
@@ -100,6 +104,7 @@ export const NAV = [
         key: "published",
         label: "Published",
         icon: Globe,
+        perm: "blogs.view",
         params: {
           status: "published",
         },
@@ -108,6 +113,7 @@ export const NAV = [
         key: "archived",
         label: "Archived",
         icon: Archive,
+        perm: "blogs.view",
         params: {
           status: "archived",
         },
@@ -121,6 +127,7 @@ export const NAV = [
         key: "media",
         label: "Media Library",
         icon: Images,
+        perm: "media.view",
       },
     ],
   },
@@ -131,22 +138,26 @@ export const NAV = [
         key: "seo-overview",
         label: "SEO Overview",
         icon: Gauge,
+        perm: "seo.view",
       },
       {
         key: "keywords",
         label: "Keyword Manager",
         icon: KeyRound,
+        perm: "seo.view",
       },
       {
         key: "optimization",
         label: "Content Optimization",
         icon: Wand2,
+        perm: "seo.view",
       },
       {
         key: "issues",
         label: "SEO Issues",
         icon: ShieldAlert,
         badge: "issues",
+        perm: "seo.issues.view",
       },
     ],
   },
@@ -163,6 +174,7 @@ export const NAV = [
         key: "analytics",
         label: "Traffic",
         icon: TrendingUp,
+        perm: "analytics.view",
         params: {
           tab: "traffic",
         },
@@ -171,6 +183,7 @@ export const NAV = [
         key: "analytics",
         label: "Search Performance",
         icon: Search,
+        perm: "analytics.view",
         params: {
           tab: "search",
         },
@@ -190,12 +203,13 @@ export const NAV = [
         key: "roles",
         label: "Roles & Permissions",
         icon: ShieldCheck,
-        perm: "team.view",
+        perm: "team.roles",
       },
       {
         key: "activity",
         label: "Activity Logs",
         icon: History,
+        perm: "team.view",
       },
     ],
   },
@@ -206,45 +220,42 @@ export const NAV = [
         key: "settings",
         label: "Settings",
         icon: Settings,
+        perm: "settings.view",
         params: {
           tab: "general",
         },
       },
-      
     ],
   },
-]
+];
 
 export function navTitle(view) {
   if (view.name === "schedule") {
-    return "Publishing Calendar"
+    return "Publishing Calendar";
   }
   if (view.name === "editor") {
-    return view.params?.id || view.id ? "Edit Blog" : "Create New Blog"
+    return view.params?.id || view.id ? "Edit Blog" : "Create New Blog";
   }
   if (view.name === "blog") {
-    return "Blog Detail"
+    return "Blog Detail";
   }
 
   for (const g of NAV) {
     for (const it of g.items) {
-      const sameView =
-        (it.view ? it.view.name : it.key) === view.name
+      const sameView = (it.view ? it.view.name : it.key) === view.name;
 
       const sameParams =
         !it.params ||
         (view.params &&
-          Object.entries(it.params).every(
-            ([k, v]) => view.params[k] === v
-          ))
+          Object.entries(it.params).every(([k, v]) => view.params[k] === v));
 
       if (sameView && sameParams) {
-        return it.label
+        return it.label;
       }
     }
   }
 
-  return "Dashboard"
+  return "Dashboard";
 }
 
 export default function Sidebar({
@@ -259,55 +270,49 @@ export default function Sidebar({
   onCloseMobile,
 }) {
   const isActive = (it) => {
-    const target = it.view ? it.view.name : it.key
+    const target = it.view ? it.view.name : it.key;
 
     if (target !== view.name) {
-      return false
+      return false;
     }
 
     if (it.params && view.params) {
-      return Object.entries(it.params).every(
-        ([k, v]) => view.params[k] === v
-      )
+      return Object.entries(it.params).every(([k, v]) => view.params[k] === v);
     }
 
     if (it.params || view.params) {
-      return it.params
-        ? false
-        : !Object.keys(view.params || {}).length
+      return it.params ? false : !Object.keys(view.params || {}).length;
     }
 
-    return true
-  }
+    return true;
+  };
 
   const badgeValue = (key) => {
     if (key === "draft" || key === "all") {
-      return undefined
+      return undefined;
     }
 
-    return counts[key] || undefined
-  }
+    return counts[key] || undefined;
+  };
 
   const handleNav = (it) => {
     const target = it.view || {
       name: it.key,
       params: it.params || undefined,
-    }
+    };
 
-    navigate(target.name, target.params)
+    navigate(target.name, target.params);
 
     if (isMobile && onCloseMobile) {
-      onCloseMobile()
+      onCloseMobile();
     }
-  }
+  };
 
   return (
     <div
       className={
         "fixed left-0 top-0 z-40 h-screen overflow-hidden flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border transition-all duration-300 " +
-        (collapsed && !isMobile
-          ? "w-[68px]"
-          : "w-[264px]")
+        (collapsed && !isMobile ? "w-[68px]" : "w-[264px]")
       }
     >
       {/* Logo */}
@@ -353,11 +358,11 @@ export default function Sidebar({
         <nav className="flex-1 overflow-y-auto py-3 px-2.5 space-y-4">
           {NAV.map((g) => {
             const items = g.items.filter(
-              (it) => !it.perm || (can && can(it.perm))
-            )
+              (it) => !it.perm || (can && can(it.perm)),
+            );
 
             if (!items.length) {
-              return null
+              return null;
             }
 
             return (
@@ -370,8 +375,8 @@ export default function Sidebar({
 
                 <div className="space-y-0.5">
                   {items.map((it) => {
-                    const Icon = it.icon
-                    const active = isActive(it)
+                    const Icon = it.icon;
+                    const active = isActive(it);
 
                     const badge =
                       it.badge === "issues"
@@ -380,7 +385,7 @@ export default function Sidebar({
                           ? counts.draft
                           : it.badge === "scheduled"
                             ? counts.scheduled
-                            : undefined
+                            : undefined;
 
                     const content = (
                       <button
@@ -406,8 +411,7 @@ export default function Sidebar({
                           style={
                             active
                               ? {
-                                  color:
-                                    "hsl(262 83% 58%)",
+                                  color: "hsl(262 83% 58%)",
                                 }
                               : {}
                           }
@@ -435,34 +439,25 @@ export default function Sidebar({
                             </Badge>
                           )}
                       </button>
-                    )
+                    );
 
                     if (collapsed && !isMobile) {
                       return (
                         <Tooltip key={it.label}>
-                          <TooltipTrigger asChild>
-                            {content}
-                          </TooltipTrigger>
+                          <TooltipTrigger asChild>{content}</TooltipTrigger>
 
-                          <TooltipContent
-                            side="right"
-                            sideOffset={8}
-                          >
+                          <TooltipContent side="right" sideOffset={8}>
                             {it.label}
                           </TooltipContent>
                         </Tooltip>
-                      )
+                      );
                     }
 
-                    return (
-                      <div key={it.label}>
-                        {content}
-                      </div>
-                    )
+                    return <div key={it.label}>{content}</div>;
                   })}
                 </div>
               </div>
-            )
+            );
           })}
         </nav>
       </TooltipProvider>
@@ -473,17 +468,15 @@ export default function Sidebar({
           onClick={() => {
             navigate("settings", {
               tab: "profile",
-            })
+            });
 
             if (isMobile && onCloseMobile) {
-              onCloseMobile()
+              onCloseMobile();
             }
           }}
           className={
             "w-full flex items-center gap-2.5 rounded-xl p-2 hover:bg-accent transition-colors text-left " +
-            (collapsed && !isMobile
-              ? "justify-center"
-              : "")
+            (collapsed && !isMobile ? "justify-center" : "")
           }
         >
           <Avatar className="h-8 w-8 border border-border">
@@ -506,14 +499,11 @@ export default function Sidebar({
         </button>
 
         {collapsed && !isMobile && (
-          <button
-            onClick={onToggleCollapsed}
-            className="sr-only"
-          >
+          <button onClick={onToggleCollapsed} className="sr-only">
             Expand
           </button>
         )}
       </div>
     </div>
-  )
+  );
 }
