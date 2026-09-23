@@ -247,6 +247,9 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const [linkBar, setLinkBar] = useState(null); // { el, href, text }
   const [highlight, setHighlight] = useState(null);
   const [seoSheetOpen, setSeoSheetOpen] = useState(false);
+  const [relatedKeywordsOpen, setRelatedKeywordsOpen] = useState(false);
+  const [editingKeyword, setEditingKeyword] = useState("");
+  const [editingKeywordOriginal, setEditingKeywordOriginal] = useState("");
   const [uploading, setUploading] = useState(false);
 
   const editorRef = useRef(null);
@@ -620,6 +623,57 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     document.execCommand(cmd, false, val || null);
     savedRange.current = null;
     onEdit();
+  }
+
+  function applyInlineStyle(property, value) {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    const sel = window.getSelection();
+    if (savedRange.current) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange.current);
+    }
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const span = document.createElement("span");
+    span.style[property] = value;
+    if (range.collapsed) {
+      span.appendChild(document.createTextNode("\u200b"));
+      range.insertNode(span);
+      range.setStart(span.firstChild, 1);
+      range.collapse(true);
+    } else {
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      sel.removeAllRanges();
+      const nextRange = document.createRange();
+      nextRange.selectNodeContents(span);
+      sel.addRange(nextRange);
+    }
+    savedRange.current = null;
+    onEdit();
+  }
+
+  function getCurrentFontSize() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !editorRef.current) return 16;
+    const container = sel.getRangeAt(0).startContainer;
+    const element =
+      container.nodeType === Node.ELEMENT_NODE
+        ? container
+        : container.parentElement;
+    if (!element || !editorRef.current.contains(element)) return 16;
+    const size = parseFloat(window.getComputedStyle(element).fontSize);
+    return Number.isFinite(size) && size > 0 ? Math.round(size) : 16;
+  }
+
+  function applyFontSize(size) {
+    const numericSize = Number(size);
+    const nextSize = Math.min(1000, Math.max(1, Math.round(numericSize)));
+    if (!Number.isFinite(nextSize)) return;
+    setFontSize(nextSize);
+    applyInlineStyle("fontSize", `${nextSize}px`);
   }
 
   function onEdit() {
@@ -1135,6 +1189,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   );
 
   const [activeStates, setActiveStates] = useState({});
+  const [fontSize, setFontSize] = useState(16);
   useEffect(() => {
     const h = () => {
       try {
@@ -1148,6 +1203,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
           ),
           insertOrderedList: document.queryCommandState("insertOrderedList"),
         });
+        setFontSize(getCurrentFontSize());
       } catch (e) {}
     };
     document.addEventListener("selectionchange", h);
@@ -1207,6 +1263,11 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
       generateSeoMetaWithAi={generateSeoMetaWithAi}
       highlight={highlight}
       setImgDialog={openPicker}
+      onRelatedKeywordClick={(keyword) => {
+        setEditingKeywordOriginal(keyword);
+        setEditingKeyword(keyword);
+        setRelatedKeywordsOpen(true);
+      }}
     />
   );
 
@@ -1819,6 +1880,61 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 >
                   <Strikethrough className="h-4 w-4" />
                 </ToolBtn>
+                <select
+                  aria-label="Font weight"
+                  defaultValue="400"
+                  onMouseDown={saveSel}
+                  onChange={(e) =>
+                    applyInlineStyle("fontWeight", e.target.value)
+                  }
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                >
+                  <option value="400">Weight</option>
+                  <option value="400">Normal</option>
+                  <option value="500">Medium</option>
+                  <option value="600">Semibold</option>
+                  <option value="700">Bold</option>
+                </select>
+                <div className="flex items-center h-8 rounded-md border border-input bg-background">
+                  <ToolBtn
+                    title="Decrease font size"
+                    onClick={() => {
+                      saveSel();
+                      applyFontSize(getCurrentFontSize() - 1);
+                    }}
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                  </ToolBtn>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000"
+                    step="1"
+                    value={fontSize}
+                    aria-label="Font size in pixels"
+                    title="Font size in pixels"
+                    onMouseDown={saveSel}
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      if (Number.isInteger(value) && value > 0 && value <= 1000) {
+                        applyFontSize(value);
+                      }
+                    }}
+                    className="h-7 w-12 border-0 bg-transparent px-1 text-center text-xs outline-none"
+                  />
+                  <span className="pr-1 text-[10px] text-muted-foreground">
+                    px
+                  </span>
+                  <ToolBtn
+                    title="Increase font size"
+                    onClick={() => {
+                      saveSel();
+                      applyFontSize(getCurrentFontSize() + 1);
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </ToolBtn>
+                </div>
                 <Separator orientation="vertical" className="h-5 mx-0.5" />
                 <ToolBtn
                   title="Bullet list"
@@ -2152,8 +2268,8 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         </div>
 
         {/* Right rail (desktop) */}
-        <div className="hidden xl:block w-[400px] shrink-0 px-4 lg:px-6 py-6">
-          <div className="sticky top-24">{rail}</div>
+        <div className="hidden xl:block w-[400px] shrink-0 px-4 lg:px-6 py-6 h-[calc(100vh-4rem)] min-h-0">
+          <div className="sticky top-16 h-full min-h-0">{rail}</div>
         </div>
       </div>
 
@@ -2170,9 +2286,44 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
           side="right"
           className="w-full sm:w-[420px] p-0 overflow-hidden"
         >
-          <div className="h-full overflow-y-auto">{rail}</div>
+          <div className="h-full min-h-0">{rail}</div>
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={relatedKeywordsOpen}
+        onOpenChange={setRelatedKeywordsOpen}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit related keywords</DialogTitle>
+            <DialogDescription>
+              Add or remove keywords associated with this blog.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={editingKeyword}
+            onChange={(e) => setEditingKeyword(e.target.value)}
+            placeholder="Related keyword"
+          />
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                const nextKeyword = editingKeyword.trim();
+                if (!nextKeyword) return;
+                upSeo({
+                  secondaryKeywords: form.seo.secondaryKeywords.map((keyword) =>
+                    keyword === editingKeywordOriginal ? nextKeyword : keyword,
+                  ),
+                });
+                setRelatedKeywordsOpen(false);
+              }}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <input
         ref={fileRef}
@@ -2635,11 +2786,12 @@ function EditorRail({
   generateSeoMetaWithAi,
   highlight,
   setImgDialog,
+  onRelatedKeywordClick,
 }) {
   const kw = kwMetrics(form.seo.focusKeyword, keywords);
   return (
-    <Card className="overflow-hidden">
-      <div className="border-b border-border px-4 pt-4 pb-0">
+    <Card className="h-full min-h-0 flex flex-col overflow-hidden">
+      <div className="shrink-0 border-b border-border px-4 pt-4 pb-0">
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="w-full h-9 justify-start bg-muted/60 p-1">
             <TabsTrigger value="seo" className="text-xs px-2.5 h-7">
@@ -2661,6 +2813,7 @@ function EditorRail({
         </Tabs>
       </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-muted-foreground/30 scrollbar-track-transparent">
       {/* SEO TAB */}
       {tab === "seo" && (
         <CardContent className="p-4 space-y-4">
@@ -2747,13 +2900,15 @@ function EditorRail({
               </p>
             )}
 
-            <Labeled label="Related keywords" hint="Enter to add">
+            <Labeled label="Related keywords" hint="Click a keyword to edit" />
+            <div>
               <ChipInput
                 value={form.seo.secondaryKeywords}
                 onChange={(secondaryKeywords) => upSeo({ secondaryKeywords })}
                 placeholder="secondary, long-tail, semantic…"
+                onChipClick={onRelatedKeywordClick}
               />
-            </Labeled>
+            </div>
           </div>
 
           {/* CHECKLIST HEADER */}
@@ -2767,41 +2922,41 @@ function EditorRail({
             </span>
           </div>
 
-          <div className="space-y-1">
-            {analysis.checks.map((c) => (
-              <div
-                key={c.id}
-                className={
-                  "rounded-lg px-2.5 py-2 " +
-                  (c.ok ? "" : "bg-amber-50/40 dark:bg-amber-950/10")
-                }
-              >
-                <div className="flex items-start gap-2">
-                  {c.ok ? (
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
-                  ) : c.warn ? (
-                    <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-                  ) : (
-                    <XCircle className="h-4 w-4 text-rose-500 mt-0.5 shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[12.5px] font-medium leading-snug">
-                      {c.label}
-                      {c.value && c.value !== "—" ? (
-                        <span className="ml-1.5 text-muted-foreground font-normal">
-                          ({c.value})
-                        </span>
-                      ) : null}
-                    </p>
-                    {!c.ok && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                        {c.fix}
-                      </p>
+          <div className="space-y-1 pr-1">
+              {analysis.checks.map((c) => (
+                <div
+                  key={c.id}
+                  className={
+                    "rounded-lg px-2.5 py-2 " +
+                    (c.ok ? "" : "bg-amber-50/40 dark:bg-amber-950/10")
+                  }
+                >
+                  <div className="flex items-start gap-2">
+                    {c.ok ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
+                    ) : c.warn ? (
+                      <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-rose-500 mt-0.5 shrink-0" />
                     )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12.5px] font-medium leading-snug">
+                        {c.label}
+                        {c.value && c.value !== "—" ? (
+                          <span className="ml-1.5 text-muted-foreground font-normal">
+                            ({c.value})
+                          </span>
+                        ) : null}
+                      </p>
+                      {!c.ok && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                          {c.fix}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
           </div>
         </CardContent>
       )}
@@ -3411,6 +3566,7 @@ function EditorRail({
           ))}
         </CardContent>
       )}
+      </div>
     </Card>
   );
 }
