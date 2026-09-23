@@ -6,7 +6,11 @@ import sharp from "sharp";
 import { getDb, clean } from "../../../lib/db";
 import { ensureSeeded } from "../../../lib/seed";
 import { analyzeSeo, slugify } from "../../../lib/seo";
-import { generateOutline, generateSeoMeta } from "../../../lib/gemini";
+import {
+  generateOutline,
+  generateSeoMeta,
+  suggestSeoAlignment,
+} from "../../../lib/gemini";
 import {
   getGoogleAnalytics,
   getSearchConsoleKeywords,
@@ -566,6 +570,11 @@ async function handleRoute(request, { params }) {
         Math.max(parseInt(sp.get("limit") || "9", 10), 1),
         50,
       );
+      const skipParam = sp.get("skip") || sp.get("offset");
+      const skip =
+        skipParam !== null && skipParam !== undefined && !isNaN(parseInt(skipParam, 10))
+          ? Math.max(parseInt(skipParam, 10), 0)
+          : (page - 1) * limit;
 
       const filter = { status: "published" };
       if (q) {
@@ -590,7 +599,7 @@ async function handleRoute(request, { params }) {
         .find(filter)
         .project({ contentHtml: 0, savedSuggestions: 0, brief: 0 })
         .sort({ publishedAt: -1, updatedAt: -1, createdAt: -1 })
-        .skip((page - 1) * limit)
+        .skip(skip)
         .limit(limit)
         .toArray();
 
@@ -2905,6 +2914,23 @@ async function handleRoute(request, { params }) {
         return handleCORS(
           NextResponse.json(
             { error: error.message || "SEO metadata generation failed" },
+            { status: error.message?.includes("not configured") ? 503 : 502 },
+          ),
+        );
+      }
+    }
+
+    // ---------- SEO ALIGNMENT SUGGESTER (GEMINI) ----------
+    if (route === "/suggest-seo-alignment" && method === "POST") {
+      const body = await request.json();
+      try {
+        const result = await suggestSeoAlignment(body);
+        return handleCORS(NextResponse.json(result));
+      } catch (error) {
+        console.error("Gemini SEO alignment error:", error);
+        return handleCORS(
+          NextResponse.json(
+            { error: error.message || "SEO alignment suggestions failed" },
             { status: error.message?.includes("not configured") ? 503 : 502 },
           ),
         );

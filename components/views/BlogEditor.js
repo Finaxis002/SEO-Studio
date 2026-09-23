@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
@@ -252,6 +252,18 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const [editingKeyword, setEditingKeyword] = useState("");
   const [editingKeywordOriginal, setEditingKeywordOriginal] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [seoSuggestOpen, setSeoSuggestOpen] = useState(false);
+  const [seoSuggestLoading, setSeoSuggestLoading] = useState(false);
+  const [seoSuggestions, setSeoSuggestions] = useState(null);
+  const [selectedSuggestions, setSelectedSuggestions] = useState({
+    focusKeyword: true,
+    seoTitle: true,
+    slug: true,
+    introParagraph: true,
+    metaDescription: true,
+    secondaryKeywords: true,
+    internalLink: true,
+  });
 
   const editorRef = useRef(null);
   const savedRange = useRef(null);
@@ -465,6 +477,134 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     [form],
   );
   const wc = analysis.stats.words;
+
+  const hasSeoInput = !!(
+    form.title?.trim() ||
+    form.seo?.focusKeyword?.trim() ||
+    (form.contentHtml && form.contentHtml.replace(/<[^>]*>/g, "").trim().length > 10)
+  );
+
+  const projectedAnalysis = useMemo(() => {
+    if (!seoSuggestions) return null;
+    const s = seoSuggestions;
+    const sel = selectedSuggestions;
+    let simHtml = form.contentHtml || "";
+    if (sel.introParagraph && s.introParagraph) {
+      simHtml = simHtml.replace(/^<p>[\s\S]*?<\/p>/, `<p>${s.introParagraph}</p>`);
+    }
+    if (sel.internalLink && s.internalLink) {
+      simHtml = simHtml.replace(
+        /^(<p>[\s\S]*?<\/p>)/,
+        `$1<p><a href="/blog/${s.internalLink.slug}">${s.internalLink.targetTitle}</a></p>`,
+      );
+    }
+    const simForm = {
+      ...form,
+      contentHtml: simHtml,
+      slug: sel.slug && s.slug ? s.slug : form.slug,
+      seo: {
+        ...form.seo,
+        metaTitle: sel.seoTitle && s.seoTitle ? s.seoTitle : form.seo.metaTitle || form.title,
+        focusKeyword: sel.focusKeyword && s.focusKeyword ? s.focusKeyword : form.seo.focusKeyword,
+        metaDescription: sel.metaDescription && s.metaDescription ? s.metaDescription : form.seo.metaDescription,
+        secondaryKeywords: sel.secondaryKeywords && s.secondaryKeywords
+          ? Array.from(new Set([...(form.seo.secondaryKeywords || []), ...s.secondaryKeywords]))
+          : form.seo.secondaryKeywords,
+      },
+    };
+    return analyzeSeo(simForm);
+  }, [seoSuggestions, selectedSuggestions, form]);
+
+  async function fetchSeoSuggestions() {
+    if (!hasSeoInput) return;
+    setSeoSuggestLoading(true);
+    try {
+      const failingChecks = (analysis.checks || [])
+        .filter((c) => !c.ok)
+        .map((c) => `${c.label}: ${c.fix}`);
+      const existingBlogs = (allBlogs?.items || [])
+        .filter((b) => b.id !== form.id && b.slug)
+        .map((b) => ({ title: b.title, slug: b.slug, keyword: b.seo?.focusKeyword || "" }));
+      const res = await api("/suggest-seo-alignment", {
+        method: "POST",
+        body: {
+          title: form.title,
+          slug: form.slug,
+          keyword: form.seo.focusKeyword,
+          contentHtml: form.contentHtml,
+          metaDescription: form.seo.metaDescription,
+          secondaryKeywords: form.seo.secondaryKeywords,
+          failingChecks,
+          existingBlogs,
+        },
+      });
+      setSeoSuggestions(res);
+      setSelectedSuggestions({
+        focusKeyword: true,
+        seoTitle: true,
+        slug: true,
+        introParagraph: true,
+        metaDescription: true,
+        secondaryKeywords: true,
+        internalLink: true,
+      });
+      setSeoSuggestOpen(true);
+    } catch (e) {
+      toast.error(e.message || "Could not fetch AI SEO suggestions");
+    } finally {
+      setSeoSuggestLoading(false);
+    }
+  }
+
+  function applySelectedSuggestions() {
+    if (!seoSuggestions) return;
+    const s = seoSuggestions;
+    const sel = selectedSuggestions;
+
+    // Build updated contentHtml
+    let html = editorRef.current ? editorRef.current.innerHTML : form.contentHtml || "";
+    if (sel.introParagraph && s.introParagraph) {
+      html = html.replace(/^<p>[\s\S]*?<\/p>/, `<p>${s.introParagraph}</p>`);
+    }
+    if (sel.internalLink && s.internalLink) {
+      const linkSentence = s.internalLink.contextSentence ||
+        `Read more: <a href="/blog/${s.internalLink.slug}">${s.internalLink.targetTitle}</a>`;
+      html = html.replace(
+        /^(<p>[\s\S]*?<\/p>)/,
+        `$1<p>${linkSentence}</p>`,
+      );
+    }
+
+    // Build updated SEO object
+    const seoUpdates = {};
+    if (sel.focusKeyword && s.focusKeyword) seoUpdates.focusKeyword = s.focusKeyword;
+    if (sel.seoTitle && s.seoTitle) {
+      seoUpdates.metaTitle = s.seoTitle;
+      seoUpdates.ogTitle = s.seoTitle;
+      seoUpdates.twitterTitle = s.seoTitle;
+    }
+    if (sel.metaDescription && s.metaDescription) {
+      seoUpdates.metaDescription = s.metaDescription;
+      seoUpdates.ogDescription = s.metaDescription;
+      seoUpdates.twitterDescription = s.metaDescription;
+    }
+    if (sel.secondaryKeywords && s.secondaryKeywords) {
+      seoUpdates.secondaryKeywords = Array.from(
+        new Set([...(form.seo.secondaryKeywords || []), ...s.secondaryKeywords]),
+      );
+    }
+
+    const formUpdates = { contentHtml: html, seo: { ...form.seo, ...seoUpdates } };
+    if (sel.slug && s.slug) {
+      formUpdates.slug = s.slug;
+      formUpdates.slugEdited = true;
+    }
+    up(formUpdates);
+    if (editorRef.current) editorRef.current.innerHTML = html;
+
+    setSeoSuggestOpen(false);
+    toast.success("AI SEO suggestions applied!");
+  }
 
   // Autosave (only for drafts, not for published blogs to prevent accidental live changes)
   useEffect(() => {
@@ -1395,8 +1535,13 @@ useEffect(() => {
         setEditingKeyword(keyword);
         setRelatedKeywordsOpen(true);
       }}
+      hasSeoInput={hasSeoInput}
+      fetchSeoSuggestions={fetchSeoSuggestions}
+      seoSuggestLoading={seoSuggestLoading}
+      allBlogs={allBlogs?.items || []}
     />
   );
+
 
   return (
     <div className="min-h-screen bg-background">
@@ -2796,7 +2941,279 @@ onBlur={saveSel}
         }}
       />
 
+      {/* AI SEO Suggestions Dialog */}
+      <Dialog open={seoSuggestOpen} onOpenChange={setSeoSuggestOpen}>
+        <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden flex flex-col" style={{maxHeight: "90vh"}}>
+
+          {/* ── Header ── */}
+          <div className="px-6 pt-5 pb-4 border-b border-border shrink-0">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <Sparkles className="h-4 w-4 text-violet-500" />
+                  <h2 className="text-[15px] font-bold tracking-tight">AI SEO Suggestions &amp; Score Impact</h2>
+                </div>
+                <p className="text-[11.5px] text-muted-foreground">
+                  Click any field to include or skip it. Watch your projected SEO score update live below!
+                </p>
+              </div>
+            </div>
+
+            {/* Score row */}
+            <div className="flex items-center gap-5 mt-3.5">
+              <div>
+                <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-semibold mb-0.5">Current Score</p>
+                <p className="text-[26px] font-black leading-none">
+                  {analysis.score}
+                  <span className="text-[13px] text-muted-foreground font-normal ml-0.5"> / 100</span>
+                </p>
+              </div>
+              <ChevronRight className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-semibold mb-0.5">Projected Score</p>
+                <p className="text-[26px] font-black leading-none">
+                  {projectedAnalysis?.score ?? analysis.score}
+                  <span className="text-[13px] text-muted-foreground font-normal ml-0.5"> / 100</span>
+                </p>
+              </div>
+              {projectedAnalysis && projectedAnalysis.score > analysis.score && (
+                <span className="ml-auto inline-flex items-center gap-1.5 bg-emerald-500 text-white text-[12px] font-bold px-3.5 py-1.5 rounded-full shadow-sm">
+                  +{projectedAnalysis.score - analysis.score} pts Boost 🚀
+                </span>
+              )}
+            </div>
+
+            {/* AI Strategy */}
+            {seoSuggestions?.strategy && (
+              <div className="mt-3 flex gap-2 rounded-lg border border-violet-100 dark:border-violet-900/40 bg-violet-50/50 dark:bg-violet-950/20 px-3 py-2.5">
+                <Info className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
+                <p className="text-[11px] text-violet-700 dark:text-violet-300 leading-relaxed">
+                  <span className="font-semibold">AI Strategy:</span> {seoSuggestions.strategy}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* ── Controls row ── */}
+          <div className="flex items-center justify-between px-6 py-2.5 border-b border-border bg-muted/20 shrink-0">
+            <p className="text-[12px] text-muted-foreground">
+              <span className="font-semibold text-foreground">
+                {Object.values(selectedSuggestions).filter(Boolean).length}
+              </span>{" "}
+              of {Object.keys(selectedSuggestions).length} suggestions selected
+            </p>
+            <div className="flex gap-4">
+              <button
+                type="button"
+                className="text-[11.5px] text-violet-600 hover:underline font-medium"
+                onClick={() =>
+                  setSelectedSuggestions({
+                    focusKeyword: true, seoTitle: true, slug: true,
+                    introParagraph: true, metaDescription: true,
+                    secondaryKeywords: true, internalLink: true,
+                  })
+                }
+              >
+                Select All
+              </button>
+              <button
+                type="button"
+                className="text-[11.5px] text-muted-foreground hover:text-foreground hover:underline font-medium"
+                onClick={() =>
+                  setSelectedSuggestions({
+                    focusKeyword: false, seoTitle: false, slug: false,
+                    introParagraph: false, metaDescription: false,
+                    secondaryKeywords: false, internalLink: false,
+                  })
+                }
+              >
+                Deselect All
+              </button>
+            </div>
+          </div>
+
+          {/* ── Scrollable cards ── */}
+          <div className="overflow-y-auto flex-1 min-h-0">
+            <div className="px-6 py-4 space-y-3">
+              {seoSuggestions &&
+                (() => {
+                  const s = seoSuggestions;
+                  const cards = [
+                    {
+                      key: "focusKeyword",
+                      label: "Focus Keyword",
+                      badge: "Primary Target",
+                      charHint: null,
+                      current: form.seo.focusKeyword || "(Not set)",
+                      suggested: s.focusKeyword,
+                    },
+                    {
+                      key: "seoTitle",
+                      label: "SEO Title (SERP)",
+                      badge: null,
+                      charHint: s.seoTitle ? `${s.seoTitle.length} / 60 chars` : null,
+                      current: form.seo.metaTitle || form.title || "(Not set)",
+                      suggested: s.seoTitle,
+                    },
+                    {
+                      key: "slug",
+                      label: "URL Slug",
+                      badge: "SEO Friendly",
+                      charHint: null,
+                      current: form.slug || "(Not set)",
+                      suggested: s.slug,
+                    },
+                    {
+                      key: "introParagraph",
+                      label: "Intro Paragraph",
+                      badge: "+7 pts",
+                      charHint: null,
+                      current: null,
+                      suggested: s.introParagraph,
+                    },
+                    {
+                      key: "metaDescription",
+                      label: "Meta Description",
+                      badge: null,
+                      charHint: s.metaDescription ? `${s.metaDescription.length} / 160 chars` : null,
+                      current: form.seo.metaDescription || "(Not set)",
+                      suggested: s.metaDescription,
+                    },
+                    {
+                      key: "secondaryKeywords",
+                      label: "Related Keywords",
+                      badge: "LSI Terms",
+                      charHint: null,
+                      current: (form.seo.secondaryKeywords || []).join(", ") || "(Not set)",
+                      suggested: Array.isArray(s.secondaryKeywords)
+                        ? s.secondaryKeywords.join(", ")
+                        : s.secondaryKeywords,
+                    },
+                    {
+                      key: "internalLink",
+                      label: "Internal Link",
+                      badge: "Link Building",
+                      charHint: null,
+                      current: null,
+                      suggested: s.internalLink
+                        ? `→ "${s.internalLink.targetTitle}" (/blog/${s.internalLink.slug})`
+                        : null,
+                      extra: s.internalLink?.contextSentence,
+                    },
+                  ];
+                  return cards
+                    .filter((c) => c.suggested)
+                    .map((card) => (
+                      <div
+                        key={card.key}
+                        onClick={() =>
+                          setSelectedSuggestions((prev) => ({
+                            ...prev,
+                            [card.key]: !prev[card.key],
+                          }))
+                        }
+                        className={
+                          "rounded-xl border p-3.5 space-y-2.5 cursor-pointer transition-all " +
+                          (selectedSuggestions[card.key]
+                            ? "border-violet-200 dark:border-violet-800 bg-white dark:bg-card"
+                            : "border-border bg-muted/10 opacity-60")
+                        }
+                      >
+                        {/* Card header row */}
+                        <div className="flex items-center gap-2.5">
+                          {/* Checkbox */}
+                          <div
+                            className={
+                              "h-4 w-4 rounded shrink-0 flex items-center justify-center border-2 transition-all " +
+                              (selectedSuggestions[card.key]
+                                ? "bg-violet-600 border-violet-600"
+                                : "border-border bg-background")
+                            }
+                          >
+                            {selectedSuggestions[card.key] && (
+                              <svg className="h-2.5 w-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                          <span className="text-[13px] font-semibold flex-1">{card.label}</span>
+                          {card.charHint && (
+                            <span className="text-[10.5px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                              {card.charHint}
+                            </span>
+                          )}
+                          {card.badge && !card.charHint && (
+                            <span className="text-[10.5px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                              {card.badge}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedSuggestions((prev) => ({ ...prev, [card.key]: true }));
+                            }}
+                            className={
+                              "h-6 px-2.5 text-[11px] rounded-md font-semibold border transition-all shrink-0 " +
+                              (selectedSuggestions[card.key]
+                                ? "bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400"
+                                : "border-border text-muted-foreground hover:text-foreground bg-background")
+                            }
+                          >
+                            ✓ Apply
+                          </button>
+                        </div>
+
+                        {/* Current value */}
+                        {card.current && (
+                          <p className="text-[11px] text-muted-foreground pl-6 leading-snug">
+                            <span className="font-medium">Current:</span>{" "}
+                            <span>{card.current}</span>
+                          </p>
+                        )}
+
+                        {/* Suggested value box */}
+                        {card.suggested && (
+                          <div className="ml-6 rounded-lg border border-border/60 bg-muted/30 dark:bg-muted/10 px-3 py-2">
+                            <p className="text-[12px] text-foreground leading-relaxed">
+                              {card.suggested}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Context sentence for internal link */}
+                        {card.extra && (
+                          <p className="text-[11px] text-muted-foreground italic pl-6 line-clamp-2">
+                            "{card.extra}"
+                          </p>
+                        )}
+                      </div>
+                    ));
+                })()}
+            </div>
+          </div>
+
+          {/* ── Footer ── */}
+          <div className="flex items-center justify-between px-6 py-3.5 border-t border-border bg-background shrink-0">
+            <Button variant="outline" className="h-9" onClick={() => setSeoSuggestOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="h-9 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-semibold gap-1.5"
+              onClick={applySelectedSuggestions}
+              disabled={Object.values(selectedSuggestions).every((v) => !v)}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              Apply Selected ({Object.values(selectedSuggestions).filter(Boolean).length})
+              {projectedAnalysis && ` (Score: ${projectedAnalysis.score}/100)`}
+            </Button>
+          </div>
+
+        </DialogContent>
+      </Dialog>
+
       {/* Quick Add Category Dialog */}
+
       <Dialog open={addCategoryOpen} onOpenChange={setAddCategoryOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -2994,8 +3411,40 @@ function EditorRail({
   highlight,
   setImgDialog,
   onRelatedKeywordClick,
+  hasSeoInput,
+  fetchSeoSuggestions,
+  seoSuggestLoading,
+  allBlogs = [],
 }) {
   const kw = kwMetrics(form.seo.focusKeyword, keywords);
+  const [linkSearchQuery, setLinkSearchQuery] = useState("");
+  const searchResults = useMemo(() => {
+    if (!linkSearchQuery.trim()) return [];
+    const q = linkSearchQuery.toLowerCase();
+    return allBlogs.filter(
+      (b) =>
+        b.id !== form.id &&
+        (b.title?.toLowerCase().includes(q) ||
+          b.slug?.toLowerCase().includes(q) ||
+          b.seo?.focusKeyword?.toLowerCase().includes(q) ||
+          (b.tags || []).some((t) => t.toLowerCase().includes(q))),
+    ).slice(0, 8);
+  }, [linkSearchQuery, allBlogs, form.id]);
+
+  function smartInsertLink(blog) {
+    const targetUrl = `/blog/${blog.slug}`;
+    const targetTitle = blog.title;
+    if (typeof window !== "undefined") {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.isCollapsed) {
+        document.execCommand("createLink", false, targetUrl);
+        return;
+      }
+    }
+    // No selection — append Related Reading callout
+    insertSuggestion({ url: targetUrl, title: targetTitle });
+  }
+
   return (
     <Card className="h-full w-full flex flex-col overflow-hidden border shadow-sm">
       <div className="shrink-0 border-b border-border px-4 pt-4 pb-0">
@@ -3054,6 +3503,35 @@ function EditorRail({
               </div>
             </div>
           </div>
+
+          {/* AI SEO SUGGESTIONS BANNER */}
+          {hasSeoInput && (
+            <div className="rounded-xl border border-violet-200/70 dark:border-violet-800/50 bg-violet-50/60 dark:bg-violet-950/20 p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-violet-500" />
+                  <span className="text-[13px] font-bold text-violet-700 dark:text-violet-300">
+                    AI SEO Suggestions
+                  </span>
+                </div>
+                <span className="text-[10.5px] font-medium text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-700 bg-white dark:bg-violet-950/40 px-2 py-0.5 rounded-full">
+                  Preview &amp; Choose
+                </span>
+              </div>
+              <p className="text-[11.5px] text-violet-700/70 dark:text-violet-300/70 leading-relaxed">
+                Auto-generate aligned Focus Keyword, SEO Title, Slug, Intro, &amp; Meta. Review before applying.
+              </p>
+              <button
+                type="button"
+                disabled={seoSuggestLoading}
+                onClick={fetchSeoSuggestions}
+                className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 disabled:opacity-60 text-white text-[13px] font-semibold transition-all"
+              >
+                <Sparkles className={`h-3.5 w-3.5 ${seoSuggestLoading ? "animate-spin" : ""}`} />
+                {seoSuggestLoading ? "Analyzing..." : "Get AI SEO Suggestions"}
+              </button>
+            </div>
+          )}
 
           {/* TARGET KEYWORDS SECTION (PROMINENT AT TOP) */}
           <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-3 shadow-xs">
@@ -3495,69 +3973,131 @@ function EditorRail({
           <div>
             <p className="text-[13px] font-semibold">Internal links</p>
             <p className="text-[11.5px] text-muted-foreground">
-              Suggested articles based on this blog&apos;s topic. Insert,
-              ignore, or save for later.
+              Search your blogs or pick from AI suggestions below.
             </p>
           </div>
-          {suggestions.length === 0 && (
-            <p className="text-[12.5px] text-muted-foreground rounded-lg border border-dashed border-border p-4 text-center">
-              No more suggestions. Add a focus keyword to improve matching.
-            </p>
-          )}
-          {suggestions.map((s) => (
-            <div
-              key={s.id}
-              className="rounded-xl border border-border p-3 space-y-2 hover:border-violet-200 transition-colors"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-[13px] font-medium leading-snug">
-                  {s.title}
+
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              value={linkSearchQuery}
+              onChange={(e) => setLinkSearchQuery(e.target.value)}
+              placeholder="Search blogs by title, slug, or keyword…"
+              className="pl-8 pr-8 h-9 text-[12.5px] bg-background"
+            />
+            {linkSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setLinkSearchQuery("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Search Results */}
+          {linkSearchQuery.trim() && (
+            <div className="space-y-2">
+              {searchResults.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground text-center py-3 border border-dashed border-border rounded-lg">
+                  No blogs found matching "{linkSearchQuery}"
                 </p>
-                <Badge
-                  variant="outline"
-                  className={
-                    "shrink-0 text-[10.5px] " +
-                    (s.relevance >= 80
-                      ? "border-emerald-200 text-emerald-600 dark:border-emerald-900 dark:text-emerald-300"
-                      : "border-violet-200 text-violet-600 dark:border-violet-900 dark:text-violet-300")
-                  }
-                >
-                  {s.relevance}% match
-                </Badge>
-              </div>
-              <p className="text-[11px] text-muted-foreground truncate">
-                Anchor: “{s.title}” → {s.url}
-              </p>
-              <div className="flex gap-1.5">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-[11.5px]"
-                  onClick={() => insertSuggestion(s)}
-                >
-                  <Link2 className="h-3 w-3 mr-1" />
-                  Insert link
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-[11.5px] text-muted-foreground"
-                  onClick={() => dismissSuggestion(s)}
-                >
-                  Ignore
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-[11.5px] text-muted-foreground"
-                  onClick={() => saveSuggestion(s)}
-                >
-                  <BookmarkPlus className="h-3 w-3 mr-1" />
-                  Save for later
-                </Button>
-              </div>
+              ) : (
+                searchResults.map((b) => (
+                  <div
+                    key={b.id}
+                    className="rounded-xl border border-border p-3 space-y-1.5 hover:border-violet-200 transition-colors"
+                  >
+                    <p className="text-[12.5px] font-medium leading-snug line-clamp-2">
+                      {b.title}
+                    </p>
+                    <p className="text-[10.5px] text-muted-foreground truncate">
+                      /blog/{b.slug}
+                      {b.seo?.focusKeyword && ` · ${b.seo.focusKeyword}`}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11.5px] w-full"
+                      onClick={() => smartInsertLink(b)}
+                    >
+                      <Link2 className="h-3 w-3 mr-1" />
+                      Insert link
+                    </Button>
+                  </div>
+                ))
+              )}
+              <Separator />
             </div>
-          ))}
+          )}
+
+          {/* AI-suggested links */}
+          {!linkSearchQuery.trim() && (
+            <>
+              {suggestions.length === 0 && (
+                <p className="text-[12.5px] text-muted-foreground rounded-lg border border-dashed border-border p-4 text-center">
+                  No more suggestions. Add a focus keyword to improve matching.
+                </p>
+              )}
+              {suggestions.map((s) => (
+                <div
+                  key={s.id}
+                  className="rounded-xl border border-border p-3 space-y-2 hover:border-violet-200 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-[13px] font-medium leading-snug">
+                      {s.title}
+                    </p>
+                    <Badge
+                      variant="outline"
+                      className={
+                        "shrink-0 text-[10.5px] " +
+                        (s.relevance >= 80
+                          ? "border-emerald-200 text-emerald-600 dark:border-emerald-900 dark:text-emerald-300"
+                          : "border-violet-200 text-violet-600 dark:border-violet-900 dark:text-violet-300")
+                      }
+                    >
+                      {s.relevance}% match
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    Anchor: "{s.title}" → {s.url}
+                  </p>
+                  <div className="flex gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11.5px]"
+                      onClick={() => insertSuggestion(s)}
+                    >
+                      <Link2 className="h-3 w-3 mr-1" />
+                      Insert link
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11.5px] text-muted-foreground"
+                      onClick={() => dismissSuggestion(s)}
+                    >
+                      Ignore
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11.5px] text-muted-foreground"
+                      onClick={() => saveSuggestion(s)}
+                    >
+                      <BookmarkPlus className="h-3 w-3 mr-1" />
+                      Save for later
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
           {form.savedSuggestions.length > 0 && (
             <>
               <Separator />
@@ -3582,6 +4122,7 @@ function EditorRail({
               ))}
             </>
           )}
+
         </CardContent>
       )}
 
