@@ -70,6 +70,13 @@ export default function BlogDetail({ blogId, navigate, can }) {
   } = useSWR(blogId ? "/api/blogs/" + blogId : null, fetcher);
   const { data: activity } = useSWR("/api/activity", fetcher);
   const { data: media } = useSWR("/api/media", fetcher);
+  const { data: indexData } = useSWR(
+    b?.status === "published" ? "/api/indexing" : null,
+    fetcher,
+  );
+  const thisBlogIndex = (indexData?.items || []).find(
+    (i) => i.id === b?.id || i.slug === b?.slug,
+  );
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -169,6 +176,29 @@ export default function BlogDetail({ blogId, navigate, can }) {
               <Badge variant="outline" className="text-[11px] font-normal">
                 {b.category}
               </Badge>
+              {b.status === "published" && thisBlogIndex && (
+                <Badge
+                  variant="outline"
+                  className={
+                    "text-[11px] font-medium gap-1 " +
+                    (thisBlogIndex.isIndexed
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300"
+                      : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300")
+                  }
+                  title={
+                    thisBlogIndex.isIndexed
+                      ? "Indexed on Google Search"
+                      : "Awaiting Google crawl"
+                  }
+                >
+                  {thisBlogIndex.isIndexed ? (
+                    <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <AlertTriangle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                  )}
+                  {thisBlogIndex.isIndexed ? "Google Indexed" : "Google: Pending Crawl"}
+                </Badge>
+              )}
               {b.scheduledAt && b.status === "scheduled" && (
                 <Badge
                   variant="outline"
@@ -287,40 +317,76 @@ export default function BlogDetail({ blogId, navigate, can }) {
                     Withdraw to Draft
                   </Button>
                 )}
-              {(b.status === "approved" || b.status === "scheduled") &&
+              {(b.status === "draft" ||
+                b.status === "in_review" ||
+                b.status === "approved" ||
+                b.status === "scheduled" ||
+                b.status === "published") &&
                 can("blogs.schedule") && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => setScheduleOpen(true)}
+                    onClick={() => {
+                      if (b.status === "draft" || b.status === "in_review") {
+                        const score = b.seo?.score || 0;
+                        setConfirmDialog({
+                          title: `Schedule blog from ${b.status === "draft" ? "Draft" : "Review"}?`,
+                          description: `This blog is currently in ${b.status === "draft" ? "Draft" : "Review"} with an SEO score of ${score}/100. Do you want to proceed to scheduling?`,
+                          confirmLabel: "Proceed to Schedule",
+                          destructive: false,
+                          onConfirm: () => setScheduleOpen(true),
+                        });
+                      } else {
+                        setScheduleOpen(true);
+                      }
+                    }}
                   >
                     <CalendarClock className="h-3.5 w-3.5 mr-1" />
-                    {b.status === "scheduled" ? "Reschedule" : "Schedule"}
+                    {b.status === "scheduled" || b.status === "published"
+                      ? "Reschedule"
+                      : "Schedule"}
                   </Button>
                 )}
-              {(b.status === "approved" || b.status === "scheduled") &&
+              {(b.status === "draft" ||
+                b.status === "in_review" ||
+                b.status === "approved" ||
+                b.status === "scheduled") &&
                 can("blogs.publish") && (
                   <Button
                     size="sm"
                     className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-sm shadow-violet-500/20"
-                    onClick={() =>
-                      api("/blogs/" + b.id + "/transition", {
-                        method: "POST",
-                        body: { to: "published" },
-                      }).then(() => {
-                        mutate();
-                        window.dispatchEvent(new Event("ss-refresh"));
-                        toast.success("Blog published successfully 🎉", {
-                          description: `"${b.title}" is now live on Vinimay.`,
-                          action: {
-                            label: "View on Vinimay ↗",
-                            onClick: () =>
-                              window.open(getVinimayBlogUrl(b.slug), "_blank"),
-                          },
-                          duration: 9000,
+                    onClick={() => {
+                      const doPublish = () =>
+                        api("/blogs/" + b.id + "/transition", {
+                          method: "POST",
+                          body: { to: "published" },
+                        }).then(() => {
+                          mutate();
+                          window.dispatchEvent(new Event("ss-refresh"));
+                          toast.success("Blog published successfully 🎉", {
+                            description: `"${b.title}" is now live on Vinimay.`,
+                            action: {
+                              label: "View on Vinimay ↗",
+                              onClick: () =>
+                                window.open(getVinimayBlogUrl(b.slug), "_blank"),
+                            },
+                            duration: 9000,
+                          });
                         });
-                      })
-                    }
+
+                      if (b.status === "draft" || b.status === "in_review") {
+                        const score = b.seo?.score || 0;
+                        setConfirmDialog({
+                          title: `Publish directly from ${b.status === "draft" ? "Draft" : "Review"}?`,
+                          description: `"${b.title}" is currently in ${b.status === "draft" ? "Draft" : "Review"} with an SEO score of ${score}/100. Publishing will make it live immediately on Vinimay. Do you want to publish now?`,
+                          confirmLabel: "Publish Now",
+                          destructive: false,
+                          onConfirm: doPublish,
+                        });
+                      } else {
+                        doPublish();
+                      }
+                    }}
                   >
                     <Rocket className="h-3.5 w-3.5 mr-1" />
                     Publish now
@@ -371,11 +437,30 @@ export default function BlogDetail({ blogId, navigate, can }) {
                     <Eye className="h-4 w-4 mr-2" />
                     Preview in editor
                   </DropdownMenuItem>
-                  {(b.status === "approved" || b.status === "scheduled") &&
+                  {(b.status === "draft" ||
+                    b.status === "in_review" ||
+                    b.status === "approved" ||
+                    b.status === "scheduled" ||
+                    b.status === "published") &&
                     can("blogs.schedule") && (
-                      <DropdownMenuItem onClick={() => setScheduleOpen(true)}>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          if (b.status === "draft" || b.status === "in_review") {
+                            const score = b.seo?.score || 0;
+                            setConfirmDialog({
+                              title: `Schedule blog from ${b.status === "draft" ? "Draft" : "Review"}?`,
+                              description: `This blog is currently in ${b.status === "draft" ? "Draft" : "Review"} with an SEO score of ${score}/100. Do you want to proceed to scheduling?`,
+                              confirmLabel: "Proceed to Schedule",
+                              destructive: false,
+                              onConfirm: () => setScheduleOpen(true),
+                            });
+                          } else {
+                            setScheduleOpen(true);
+                          }
+                        }}
+                      >
                         <CalendarClock className="h-4 w-4 mr-2" />
-                        {b.status === "scheduled"
+                        {b.status === "scheduled" || b.status === "published"
                           ? "Reschedule"
                           : "Schedule publish"}
                       </DropdownMenuItem>
@@ -471,24 +556,30 @@ export default function BlogDetail({ blogId, navigate, can }) {
                     </DropdownMenuItem>
                   )}
                   {can("blogs.edit") &&
-                    (b.status === "published" ||
+                    (b.status === "approved" ||
+                      b.status === "published" ||
                       b.status === "scheduled" ||
                       b.status === "archived") && (
                       <DropdownMenuItem
                         onClick={() => {
                           const isPub = b.status === "published";
                           const isSched = b.status === "scheduled";
+                          const isAppr = b.status === "approved";
                           setConfirmDialog({
                             title: isPub
                               ? "Unpublish blog to Draft?"
                               : isSched
                                 ? "Cancel schedule and move to Draft?"
-                                : "Restore to Draft?",
+                                : isAppr
+                                  ? "Move approved blog back to Draft?"
+                                  : "Restore to Draft?",
                             description: isPub
                               ? `"${b.title}" is currently live on your website. Moving it to Draft will immediately unpublish it and remove it from public view. Are you sure you want to unpublish?`
                               : isSched
                                 ? `"${b.title}" is scheduled to be published. Moving it to Draft will cancel the schedule. Do you want to proceed?`
-                                : `"${b.title}" will be restored to Draft status so you can edit it.`,
+                                : isAppr
+                                  ? `"${b.title}" has been approved for publishing. Moving it back to Draft will allow editing and require re-approval. Continue?`
+                                  : `"${b.title}" will be restored to Draft status so you can edit it.`,
                             confirmLabel: isPub
                               ? "Unpublish to Draft"
                               : "Move to Draft",
@@ -607,6 +698,16 @@ export default function BlogDetail({ blogId, navigate, can }) {
                       " · " +
                       (b.seo?.robots?.follow ? "Follow" : "No Follow"),
                   ],
+                  ...(b.status === "published" && thisBlogIndex
+                    ? [
+                        [
+                          "Google Search Status",
+                          thisBlogIndex.isIndexed
+                            ? `Indexed ✅ (${thisBlogIndex.impressions} impressions, ${thisBlogIndex.clicks} clicks)`
+                            : "Pending Google Crawl ⏳",
+                        ],
+                      ]
+                    : []),
                   [
                     "Secondary keywords",
                     (b.seo?.secondaryKeywords || []).join(", ") || "—",

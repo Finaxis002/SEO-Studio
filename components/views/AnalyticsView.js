@@ -12,9 +12,21 @@ import {
   Hash,
   Gauge,
   BarChart3,
+  Globe,
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink,
+  Sparkles,
+  Search,
+  Image as ImageIcon,
+  FileText,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -23,7 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetcher, fmtNum } from "@/lib/client";
+import { fetcher, fmtNum, fmtDate } from "@/lib/client";
 import { TrendChart, PositionChart, Donut } from "../charts";
 import { EmptyState } from "../bits";
 
@@ -35,10 +47,16 @@ const RANGES = [
   { v: "365", l: "1 Year" },
 ];
 
-export default function AnalyticsView({ initialTab }) {
+export default function AnalyticsView({ initialTab, navigate }) {
   const [range, setRange] = useState("30");
   const [tab, setTab] = useState(initialTab || "overview");
+  const [indexSearch, setIndexSearch] = useState("");
+  const [indexFilter, setIndexFilter] = useState("all");
   const { data, error } = useSWR("/api/analytics?range=" + range, fetcher);
+  const { data: indexData, isLoading: indexLoading } = useSWR(
+    "/api/indexing",
+    fetcher,
+  );
 
   if (error || data?.error)
     return (
@@ -140,52 +158,60 @@ export default function AnalyticsView({ initialTab }) {
             <TabsTrigger value="search" className="text-xs px-3">
               Search
             </TabsTrigger>
+            <TabsTrigger value="indexing" className="text-xs px-3 flex items-center gap-1.5">
+              <Globe className="h-3.5 w-3.5 text-violet-500" />
+              Google Indexing
+            </TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground font-medium">
-          Date range
-        </span>
-        <Select value={range} onValueChange={setRange}>
-          <SelectTrigger className="w-[130px] h-8 bg-muted/40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {RANGES.map((r) => (
-              <SelectItem key={r.v} value={r.v}>
-                {r.l}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {tab !== "indexing" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground font-medium">
+            Date range
+          </span>
+          <Select value={range} onValueChange={setRange}>
+            <SelectTrigger className="w-[130px] h-8 bg-muted/40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RANGES.map((r) => (
+                <SelectItem key={r.v} value={r.v}>
+                  {r.l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        {cards.map((c) => (
-          <Card key={c.label} className="card-hover">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <c.icon className={"h-4 w-4 " + c.color} />
-                <span
-                  className={
-                    "text-[11px] font-bold " +
-                    ((c.invert ? c.delta < 0 : c.delta >= 0)
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-rose-600 dark:text-rose-400")
-                  }
-                >
-                  {c.delta >= 0 ? "+" : ""}
-                  {c.delta}%
-                </span>
-              </div>
-              <p className="text-xl font-bold tabular-nums mt-2">{c.value}</p>
-              <p className="text-[11.5px] text-muted-foreground">{c.label}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {tab !== "indexing" && (
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          {cards.map((c) => (
+            <Card key={c.label} className="card-hover">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <c.icon className={"h-4 w-4 " + c.color} />
+                  <span
+                    className={
+                      "text-[11px] font-bold " +
+                      ((c.invert ? c.delta < 0 : c.delta >= 0)
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-600 dark:text-rose-400")
+                    }
+                  >
+                    {c.delta >= 0 ? "+" : ""}
+                    {c.delta}%
+                  </span>
+                </div>
+                <p className="text-xl font-bold tabular-nums mt-2">{c.value}</p>
+                <p className="text-[11.5px] text-muted-foreground">{c.label}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {(tab === "overview" || tab === "traffic") && (
         <>
@@ -396,6 +422,261 @@ export default function AnalyticsView({ initialTab }) {
             </Card>
           </div>
         </>
+      )}
+
+      {/* Google Indexing Tab */}
+      {tab === "indexing" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Card className="card-hover border-emerald-500/30 bg-emerald-50/30 dark:bg-emerald-950/20">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                    Google Indexed
+                  </span>
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <p className="text-2xl font-bold tabular-nums mt-1 text-emerald-800 dark:text-emerald-200">
+                  {indexLoading ? "…" : `${indexData?.summary?.indexed || 0} / ${indexData?.summary?.total || 0}`}
+                </p>
+                <p className="text-[11.5px] text-muted-foreground mt-0.5">
+                  {indexLoading
+                    ? "Checking Google Search Console…"
+                    : `${indexData?.summary?.rate || 0}% of published blogs are indexed`}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="card-hover border-amber-500/30 bg-amber-50/30 dark:bg-amber-950/20">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                    Pending Crawl
+                  </span>
+                  <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                </div>
+                <p className="text-2xl font-bold tabular-nums mt-1 text-amber-800 dark:text-amber-200">
+                  {indexLoading ? "…" : indexData?.summary?.pending || 0}
+                </p>
+                <p className="text-[11.5px] text-muted-foreground mt-0.5">
+                  Awaiting Google bot discovery & index
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="card-hover">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    Search Console Property
+                  </span>
+                  <Globe className="h-4 w-4 text-violet-500" />
+                </div>
+                <p className="text-sm font-semibold truncate mt-2 font-mono">
+                  {indexData?.summary?.siteUrl || "Connected via GSC"}
+                </p>
+                <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> API Connected (Service Account)
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="card-hover overflow-hidden">
+            <CardHeader className="p-4 pb-3 border-b border-border/60">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+                <div>
+                  <CardTitle className="text-[15px]">
+                    Published Blogs Index Status
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Verified via Google Search Console API (90d)
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative w-full sm:w-56">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Search blogs…"
+                      value={indexSearch}
+                      onChange={(e) => setIndexSearch(e.target.value)}
+                      className="pl-8 h-8 text-xs bg-muted/40"
+                    />
+                    {indexSearch && (
+                      <button
+                        onClick={() => setIndexSearch("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <Select value={indexFilter} onValueChange={setIndexFilter}>
+                    <SelectTrigger className="w-[150px] h-8 text-xs bg-muted/40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="indexed">
+                        Indexed ({indexData?.summary?.indexed || 0})
+                      </SelectItem>
+                      <SelectItem value="pending">
+                        Pending ({indexData?.summary?.pending || 0})
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {(indexSearch || indexFilter !== "all") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      onClick={() => {
+                        setIndexSearch("");
+                        setIndexFilter("all");
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {indexLoading ? (
+                <div className="p-4 space-y-3">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Skeleton key={i} className="h-12 w-full rounded-md" />
+                  ))}
+                </div>
+              ) : (indexData?.items || []).length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  No published blogs found. Publish blogs to see their Google indexing status.
+                </div>
+              ) : (() => {
+                const filtered = (indexData?.items || []).filter((item) => {
+                  if (indexFilter === "indexed" && !item.isIndexed) return false;
+                  if (indexFilter === "pending" && item.isIndexed) return false;
+                  if (indexSearch.trim()) {
+                    const q = indexSearch.toLowerCase();
+                    return (
+                      item.title?.toLowerCase().includes(q) ||
+                      item.slug?.toLowerCase().includes(q)
+                    );
+                  }
+                  return true;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="p-8 text-center text-sm text-muted-foreground">
+                      No blogs match your filter criteria.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border/60 bg-muted/30 text-muted-foreground">
+                          <th className="text-left font-semibold px-4 py-2.5">
+                            Blog
+                          </th>
+                          <th className="text-left font-semibold px-3 py-2.5">
+                            Published
+                          </th>
+                          <th className="text-left font-semibold px-3 py-2.5">
+                            Index Status
+                          </th>
+                          <th className="text-right font-semibold px-3 py-2.5">
+                            Impressions
+                          </th>
+                          <th className="text-right font-semibold px-3 py-2.5">
+                            Clicks
+                          </th>
+                          <th className="text-right font-semibold px-4 py-2.5">
+                            Avg Position
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {filtered.map((item) => (
+                          <tr
+                            key={item.id}
+                            className="hover:bg-accent/40 transition-colors"
+                          >
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                {item.featuredImage ? (
+                                  <img
+                                    src={item.featuredImage}
+                                    alt={item.title}
+                                    className="w-10 h-10 rounded-lg object-cover border border-border shrink-0 shadow-xs"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center border border-border shrink-0 text-muted-foreground">
+                                    <ImageIcon className="h-4 w-4" />
+                                  </div>
+                                )}
+                                <div className="min-w-0 max-w-[260px] sm:max-w-[320px]">
+                                  <p
+                                    onClick={() =>
+                                      navigate?.("blog", { id: item.id })
+                                    }
+                                    className="font-medium text-[13px] truncate text-foreground hover:text-primary transition-colors cursor-pointer"
+                                    title={item.title}
+                                  >
+                                    {item.title}
+                                  </p>
+                                  <p className="text-[11px] text-muted-foreground truncate font-mono">
+                                    /blogs/{item.slug}
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
+                              {fmtDate(item.publishedAt)}
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              {item.isIndexed ? (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 gap-1 font-medium text-[11px]"
+                                >
+                                  <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                                  Indexed
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 gap-1 font-medium text-[11px]"
+                                >
+                                  <AlertCircle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                                  Pending Crawl
+                                </Badge>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-right tabular-nums font-semibold">
+                              {item.impressions > 0
+                                ? fmtNum(item.impressions)
+                                : "—"}
+                            </td>
+                            <td className="px-3 py-3 text-right tabular-nums">
+                              {item.clicks > 0 ? fmtNum(item.clicks) : "—"}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums font-medium">
+                              {item.position > 0 ? `#${item.position}` : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );

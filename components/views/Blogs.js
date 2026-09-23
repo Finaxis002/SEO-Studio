@@ -104,11 +104,20 @@ export default function Blogs({ statusFilter, navigate, can }) {
     return "/api/blogs?" + p.toString();
   }, [q, status, author, category, band, sort, page]);
 
-  const { data, error, mutate } = useSWR(query, fetcher);
+  const { data, error, mutate } = useSWR(query, fetcher, {
+    keepPreviousData: true,
+  });
   const { data: team } = useSWR("/api/team", fetcher);
 
+  const [savedCounts, setSavedCounts] = useState({});
+  useEffect(() => {
+    if (data?.counts) {
+      setSavedCounts((prev) => ({ ...prev, ...data.counts }));
+    }
+  }, [data?.counts]);
+
   const items = data?.items || [];
-  const counts = data?.counts || {};
+  const counts = data?.counts || savedCounts;
 
   const refresh = () => {
     mutate();
@@ -175,34 +184,69 @@ export default function Blogs({ statusFilter, navigate, can }) {
         },
       },
       {
-        label: b.status === "scheduled" ? "Reschedule" : "Schedule",
+        label: b.status === "scheduled" || b.status === "published" ? "Reschedule" : "Schedule",
         icon: CalendarClock,
         show:
-          (b.status === "approved" || b.status === "scheduled") &&
+          (b.status === "draft" ||
+            b.status === "in_review" ||
+            b.status === "approved" ||
+            b.status === "scheduled" ||
+            b.status === "published") &&
           can("blogs.schedule"),
-        onClick: () => setScheduleBlog(b),
+        onClick: () => {
+          if (b.status === "draft" || b.status === "in_review") {
+            const score = b.seo?.score || 0;
+            setConfirmDialog({
+              title: `Schedule blog from ${b.status === "draft" ? "Draft" : "Review"}?`,
+              description: `"${b.title}" is in ${b.status === "draft" ? "Draft" : "Review"} with an SEO score of ${score}/100. Do you want to proceed to scheduling?`,
+              confirmLabel: "Proceed to Schedule",
+              destructive: false,
+              onConfirm: () => setScheduleBlog(b),
+            });
+          } else {
+            setScheduleBlog(b);
+          }
+        },
       },
       {
         label: "Publish now",
         icon: Rocket,
         show:
-          (b.status === "approved" || b.status === "scheduled") &&
+          (b.status === "draft" ||
+            b.status === "in_review" ||
+            b.status === "approved" ||
+            b.status === "scheduled") &&
           can("blogs.publish"),
-        onClick: () =>
-          api("/blogs/" + b.id + "/transition", {
-            method: "POST",
-            body: { to: "published" },
-          }).then(() => {
-            refresh();
-            toast.success("Blog published successfully 🎉", {
-              description: `"${b.title}" is now live on Vinimay.`,
-              action: {
-                label: "View on Vinimay ↗",
-                onClick: () => window.open(getVinimayBlogUrl(b.slug), "_blank"),
-              },
-              duration: 9000,
+        onClick: () => {
+          const doPublish = () =>
+            api("/blogs/" + b.id + "/transition", {
+              method: "POST",
+              body: { to: "published" },
+            }).then(() => {
+              refresh();
+              toast.success("Blog published successfully 🎉", {
+                description: `"${b.title}" is now live on Vinimay.`,
+                action: {
+                  label: "View on Vinimay ↗",
+                  onClick: () => window.open(getVinimayBlogUrl(b.slug), "_blank"),
+                },
+                duration: 9000,
+              });
             });
-          }),
+
+          if (b.status === "draft" || b.status === "in_review") {
+            const score = b.seo?.score || 0;
+            setConfirmDialog({
+              title: `Publish directly from ${b.status === "draft" ? "Draft" : "Review"}?`,
+              description: `"${b.title}" is currently in ${b.status === "draft" ? "Draft" : "Review"} with an SEO score of ${score}/100. Publishing will make it live immediately on Vinimay. Do you want to publish now?`,
+              confirmLabel: "Publish Now",
+              destructive: false,
+              onConfirm: doPublish,
+            });
+          } else {
+            doPublish();
+          }
+        },
       },
       {
         label: "Submit for Review",
@@ -246,19 +290,24 @@ export default function Blogs({ statusFilter, navigate, can }) {
       {
         label: isPub ? "Unpublish to Draft" : "Move to Draft",
         icon: RotateCcw,
-        show: isPub || isSched || b.status === "archived",
+        show: isPub || isSched || b.status === "archived" || b.status === "approved",
         onClick: () => {
+          const isAppr = b.status === "approved";
           setConfirmDialog({
             title: isPub
               ? "Unpublish blog to Draft?"
               : isSched
                 ? "Cancel schedule and move to Draft?"
-                : "Restore to Draft?",
+                : isAppr
+                  ? "Move approved blog back to Draft?"
+                  : "Restore to Draft?",
             description: isPub
               ? `"${b.title}" is currently live on your website. Moving it to Draft will immediately unpublish it and remove it from public view. Are you sure you want to unpublish?`
               : isSched
                 ? `"${b.title}" is scheduled to be published. Moving it to Draft will cancel the schedule. Do you want to proceed?`
-                : `"${b.title}" will be restored to Draft status so you can edit it.`,
+                : isAppr
+                  ? `"${b.title}" has been approved for publishing. Moving it back to Draft will allow editing and require re-approval. Continue?`
+                  : `"${b.title}" will be restored to Draft status so you can edit it.`,
             confirmLabel: isPub ? "Unpublish to Draft" : "Move to Draft",
             destructive: isPub || isSched,
             onConfirm: () =>
@@ -324,8 +373,8 @@ export default function Blogs({ statusFilter, navigate, can }) {
                 className="text-xs h-7 px-3 data-[state=active]:bg-background data-[state=active]:shadow-sm"
               >
                 {t.l}{" "}
-                <span className="ml-1.5 text-[10px] text-muted-foreground tabular-nums">
-                  {counts[t.v] ?? ""}
+                <span className="ml-1.5 text-[10px] text-muted-foreground tabular-nums inline-block min-w-[12px] text-center font-medium">
+                  {counts[t.v] !== undefined ? counts[t.v] : ""}
                 </span>
               </TabsTrigger>
             ))}

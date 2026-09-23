@@ -1512,15 +1512,30 @@ useEffect(() => {
                     </Button>
                   </>
                 )}
-                {can("blogs.schedule") && form.status !== "published" && (
+                {can("blogs.schedule") && (
                   <Button
                     variant="outline"
                     size="sm"
                     className="h-9"
-                    onClick={() => setScheduleOpen(true)}
+                    onClick={() => {
+                      if (
+                        (form.status === "draft" || form.status === "in_review") &&
+                        !checklistOk
+                      ) {
+                        toast.warning(
+                          `SEO score is ${analysis.score}/100 with incomplete checklist items. Opening schedule...`,
+                          { duration: 4000 },
+                        );
+                      }
+                      setScheduleOpen(true);
+                    }}
                   >
                     <CalendarClock className="h-4 w-4 mr-1.5" />{" "}
-                    <span className="hidden sm:inline">Schedule</span>
+                    <span className="hidden sm:inline">
+                      {form.status === "scheduled" || form.status === "published"
+                        ? "Reschedule"
+                        : "Schedule"}
+                    </span>
                   </Button>
                 )}
                 <Button
@@ -2450,8 +2465,8 @@ onBlur={saveSel}
         </div>
 
         {/* Right rail (desktop) */}
-        <div className="hidden xl:block w-[400px] shrink-0 self-start px-4 lg:px-6 py-6">
-          <div className="sticky top-20 h-[calc(100vh-5rem)] min-h-0">{rail}</div>
+        <div className="hidden xl:block w-[410px] shrink-0 sticky top-16 h-[calc(100vh-4rem)] py-6 px-4 lg:px-6">
+          <div className="h-full w-full min-h-0">{rail}</div>
         </div>
       </div>
 
@@ -2972,7 +2987,7 @@ function EditorRail({
 }) {
   const kw = kwMetrics(form.seo.focusKeyword, keywords);
   return (
-<Card className="sticky top-6 self-start max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden">
+    <Card className="h-full w-full flex flex-col overflow-hidden border shadow-sm">
       <div className="shrink-0 border-b border-border px-4 pt-4 pb-0">
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="w-full h-9 justify-start bg-muted/60 p-1">

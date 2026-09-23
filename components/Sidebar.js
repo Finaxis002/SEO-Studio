@@ -188,6 +188,15 @@ export const NAV = [
           tab: "search",
         },
       },
+      {
+        key: "analytics",
+        label: "Google Indexing",
+        icon: Globe,
+        perm: "analytics.view",
+        params: {
+          tab: "indexing",
+        },
+      },
     ],
   },
   {

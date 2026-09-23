@@ -22,6 +22,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { api, fetcher, fmtDate, fmtDateTime } from "@/lib/client";
 import { StatusBadge, EmptyState, ScheduleDialog } from "../bits";
 import dayjs from "dayjs";
@@ -29,6 +36,7 @@ import dayjs from "dayjs";
 export default function ScheduleView({ navigate, can }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [resched, setResched] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(null);
   const { data: blogs, mutate } = useSWR(
     "/api/blogs?limit=100&status=scheduled,published",
     fetcher,
@@ -158,9 +166,16 @@ export default function ScheduleView({ navigate, can }) {
                           </button>
                         ))}
                         {evs.length > 2 && (
-                          <span className="text-[9.5px] text-muted-foreground pl-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedDay({ date: day, events: evs });
+                            }}
+                            className="text-[9.5px] font-semibold text-violet-600 dark:text-violet-400 hover:text-violet-800 dark:hover:text-violet-300 hover:underline pl-1 block text-left transition-colors cursor-pointer"
+                          >
                             +{evs.length - 2} more
-                          </span>
+                          </button>
                         )}
                       </div>
                     </>
@@ -280,6 +295,90 @@ export default function ScheduleView({ navigate, can }) {
             .catch((e) => toast.error(e.message));
         }}
       />
+
+      {/* Day Events Dialog */}
+      <Dialog
+        open={!!selectedDay}
+        onOpenChange={(open) => !open && setSelectedDay(null)}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <CalendarDays className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+              {selectedDay?.date
+                ? dayjs(selectedDay.date).format("dddd, D MMMM YYYY")
+                : "Blogs on this date"}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedDay?.events?.length || 0}{" "}
+              {selectedDay?.events?.length === 1 ? "blog" : "blogs"} scheduled or published on this date
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2 max-h-[60vh] overflow-y-auto pr-1">
+            {(selectedDay?.events || []).map((b) => (
+              <div
+                key={b.id}
+                className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border/70 hover:bg-muted/40 transition-colors"
+              >
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  {b.status === "scheduled" ? (
+                    <CalendarClock className="h-4 w-4 text-violet-500 shrink-0" />
+                  ) : (
+                    <Globe className="h-4 w-4 text-emerald-500 shrink-0" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <button
+                      onClick={() => {
+                        setSelectedDay(null);
+                        navigate("blog", { id: b.id });
+                      }}
+                      className="text-sm font-medium text-left truncate block hover:text-primary transition-colors hover:underline w-full"
+                      title={b.title}
+                    >
+                      {b.title}
+                    </button>
+                    <span className="text-[11px] text-muted-foreground block">
+                      {b.status === "scheduled"
+                        ? "⏰ Publishes " + fmtDateTime(b.scheduledAt)
+                        : "Published " + fmtDate(b.publishedAt)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <StatusBadge status={b.status} />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-xs"
+                    onClick={() => {
+                      setSelectedDay(null);
+                      navigate("editor", { id: b.id });
+                    }}
+                    title="Edit blog"
+                  >
+                    <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                  </Button>
+                  {can("blogs.schedule") && b.status === "scheduled" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      onClick={() => {
+                        setResched(b);
+                      }}
+                      title="Reschedule"
+                    >
+                      <CalendarClock className="h-3.5 w-3.5 mr-1" /> Reschedule
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
