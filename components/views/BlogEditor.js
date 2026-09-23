@@ -668,6 +668,27 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     return Number.isFinite(size) && size > 0 ? Math.round(size) : 16;
   }
 
+  function getCurrentFontWeight() {
+  const sel = window.getSelection();
+
+  if (!sel || !sel.rangeCount || !editorRef.current) return 400;
+
+  const container = sel.getRangeAt(0).startContainer;
+
+  const element =
+    container.nodeType === Node.ELEMENT_NODE
+      ? container
+      : container.parentElement;
+
+  if (!element || !editorRef.current.contains(element)) return 400;
+
+  const weight = window.getComputedStyle(element).fontWeight;
+
+  const numericWeight = parseInt(weight, 10);
+
+  return Number.isFinite(numericWeight) ? numericWeight : 400;
+}
+
   function applyFontSize(size) {
     const numericSize = Number(size);
     const nextSize = Math.min(1000, Math.max(1, Math.round(numericSize)));
@@ -676,6 +697,15 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     applyInlineStyle("fontSize", `${nextSize}px`);
   }
 
+
+function applyFontWeight(weight) {
+  const numericWeight = Number(weight);
+
+  if (!Number.isFinite(numericWeight)) return;
+
+  setFontWeight(numericWeight);
+  applyInlineStyle("fontWeight", numericWeight);
+}
   function onEdit() {
     setDirty(true);
     setHasChanges(true);
@@ -721,6 +751,8 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     onEdit();
   }
 
+
+  
   // image & link selection inside editor
   function handleEditorClick(e) {
     // Handle clicking links
@@ -765,6 +797,46 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
       });
     } else setImgBar(null);
   }
+
+
+function handleTextSelection() {
+  const sel = window.getSelection();
+
+  if (
+    !sel ||
+    !sel.rangeCount ||
+    sel.isCollapsed ||
+    !editorRef.current ||
+    !editorRef.current.contains(sel.anchorNode)
+  ) {
+    setTextFormatOpen(false);
+    return;
+  }
+
+  const range = sel.getRangeAt(0);
+
+  const rect = range.getBoundingClientRect();
+
+  if (!rect.width && !rect.height) {
+    setTextFormatOpen(false);
+    return;
+  }
+
+  setTextFormatPosition({
+    top: rect.top - 8,
+    left: rect.left + rect.width / 2,
+  });
+
+  setFontSize(getCurrentFontSize());
+  setFontWeight(getCurrentFontWeight());
+
+  // Save selection so popup controls can modify selected text
+  savedRange.current = range.cloneRange();
+
+  setTextFormatOpen(true);
+}
+
+
 
   function updateSelectedImg(mut) {
     const bar = imgBar;
@@ -1190,25 +1262,76 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
 
   const [activeStates, setActiveStates] = useState({});
   const [fontSize, setFontSize] = useState(16);
-  useEffect(() => {
-    const h = () => {
-      try {
-        setActiveStates({
-          bold: document.queryCommandState("bold"),
-          italic: document.queryCommandState("italic"),
-          underline: document.queryCommandState("underline"),
-          strikeThrough: document.queryCommandState("strikeThrough"),
-          insertUnorderedList: document.queryCommandState(
-            "insertUnorderedList",
-          ),
-          insertOrderedList: document.queryCommandState("insertOrderedList"),
-        });
-        setFontSize(getCurrentFontSize());
-      } catch (e) {}
-    };
-    document.addEventListener("selectionchange", h);
-    return () => document.removeEventListener("selectionchange", h);
-  }, []);
+  const [fontWeight, setFontWeight] = useState(400);
+const [textFormatOpen, setTextFormatOpen] = useState(false);
+const [textFormatPosition, setTextFormatPosition] = useState({
+  top: 0,
+  left: 0,
+});
+
+useEffect(() => {
+  const h = () => {
+    try {
+      const sel = window.getSelection();
+
+      if (
+        !sel ||
+        !sel.rangeCount ||
+        !editorRef.current ||
+        !editorRef.current.contains(sel.anchorNode)
+      ) {
+        setTextFormatOpen(false);
+        return;
+      }
+
+      setActiveStates({
+        bold: document.queryCommandState("bold"),
+        italic: document.queryCommandState("italic"),
+        underline: document.queryCommandState("underline"),
+        strikeThrough: document.queryCommandState("strikeThrough"),
+        insertUnorderedList: document.queryCommandState(
+          "insertUnorderedList",
+        ),
+        insertOrderedList: document.queryCommandState(
+          "insertOrderedList",
+        ),
+      });
+
+      setFontSize(getCurrentFontSize());
+      setFontWeight(getCurrentFontWeight());
+
+      // No selected text
+      if (sel.isCollapsed) {
+        setTextFormatOpen(false);
+        return;
+      }
+
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+
+      if (!rect.width && !rect.height) {
+        setTextFormatOpen(false);
+        return;
+      }
+
+      setTextFormatPosition({
+        top: rect.top - 8,
+        left: rect.left + rect.width / 2,
+      });
+
+      savedRange.current = range.cloneRange();
+      setTextFormatOpen(true);
+    } catch (e) {
+      setTextFormatOpen(false);
+    }
+  };
+
+  document.addEventListener("selectionchange", h);
+
+  return () => {
+    document.removeEventListener("selectionchange", h);
+  };
+}, []);
 
   if (loading) {
     return (
@@ -1880,61 +2003,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 >
                   <Strikethrough className="h-4 w-4" />
                 </ToolBtn>
-                <select
-                  aria-label="Font weight"
-                  defaultValue="400"
-                  onMouseDown={saveSel}
-                  onChange={(e) =>
-                    applyInlineStyle("fontWeight", e.target.value)
-                  }
-                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                >
-                  <option value="400">Weight</option>
-                  <option value="400">Normal</option>
-                  <option value="500">Medium</option>
-                  <option value="600">Semibold</option>
-                  <option value="700">Bold</option>
-                </select>
-                <div className="flex items-center h-8 rounded-md border border-input bg-background">
-                  <ToolBtn
-                    title="Decrease font size"
-                    onClick={() => {
-                      saveSel();
-                      applyFontSize(getCurrentFontSize() - 1);
-                    }}
-                  >
-                    <Minus className="h-3.5 w-3.5" />
-                  </ToolBtn>
-                  <input
-                    type="number"
-                    min="1"
-                    max="1000"
-                    step="1"
-                    value={fontSize}
-                    aria-label="Font size in pixels"
-                    title="Font size in pixels"
-                    onMouseDown={saveSel}
-                    onChange={(e) => {
-                      const value = Number(e.target.value);
-                      if (Number.isInteger(value) && value > 0 && value <= 1000) {
-                        applyFontSize(value);
-                      }
-                    }}
-                    className="h-7 w-12 border-0 bg-transparent px-1 text-center text-xs outline-none"
-                  />
-                  <span className="pr-1 text-[10px] text-muted-foreground">
-                    px
-                  </span>
-                  <ToolBtn
-                    title="Increase font size"
-                    onClick={() => {
-                      saveSel();
-                      applyFontSize(getCurrentFontSize() + 1);
-                    }}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </ToolBtn>
-                </div>
+            
                 <Separator orientation="vertical" className="h-5 mx-0.5" />
                 <ToolBtn
                   title="Bullet list"
@@ -2239,15 +2308,128 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 </div>
               )}
 
-              <div
+
+{/* POWERPOINT-STYLE TEXT FORMATTING POPUP */}
+{textFormatOpen && (
+  <div
+    className="fixed z-50 flex items-center gap-1 rounded-lg border bg-background p-2 shadow-lg"
+    style={{
+      top: textFormatPosition.top,
+      left: textFormatPosition.left,
+      transform: "translate(-50%, -100%)",
+    }}
+  >
+    {/* Font Size */}
+    <div className="flex items-center rounded-md border">
+      <button
+        type="button"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          saveSel();
+          applyFontSize(getCurrentFontSize() - 1);
+        }}
+        className="h-8 w-8 text-sm hover:bg-accent"
+      >
+        −
+      </button>
+
+      <input
+        type="number"
+        min="1"
+        max="1000"
+        value={fontSize}
+        onMouseDown={saveSel}
+        onChange={(e) => {
+          const value = Number(e.target.value);
+
+          if (
+            Number.isInteger(value) &&
+            value > 0 &&
+            value <= 1000
+          ) {
+            applyFontSize(value);
+          }
+        }}
+        className="h-8 w-12 border-x bg-transparent text-center text-xs outline-none"
+      />
+
+      <button
+        type="button"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          saveSel();
+          applyFontSize(getCurrentFontSize() + 1);
+        }}
+        className="h-8 w-8 text-sm hover:bg-accent"
+      >
+        +
+      </button>
+    </div>
+
+
+    {/* Bold */}
+    <button
+      type="button"
+      onMouseDown={(e) => {
+        e.preventDefault();
+        saveSel();
+        exec("bold");
+      }}
+      className={`h-8 w-8 rounded-md text-sm font-bold hover:bg-accent ${
+        activeStates.bold
+          ? "bg-violet-100 text-violet-700"
+          : ""
+      }`}
+    >
+      B
+    </button>
+
+    {/* Italic */}
+    <button
+      type="button"
+      onMouseDown={(e) => {
+        e.preventDefault();
+        saveSel();
+        exec("italic");
+      }}
+      className={`h-8 w-8 rounded-md text-sm italic hover:bg-accent ${
+        activeStates.italic
+          ? "bg-violet-100 text-violet-700"
+          : ""
+      }`}
+    >
+      I
+    </button>
+
+    {/* Underline */}
+    <button
+      type="button"
+      onMouseDown={(e) => {
+        e.preventDefault();
+        saveSel();
+        exec("underline");
+      }}
+      className={`h-8 w-8 rounded-md text-sm underline hover:bg-accent ${
+        activeStates.underline
+          ? "bg-violet-100 text-violet-700"
+          : ""
+      }`}
+    >
+      U
+    </button>
+  </div>
+)}
+
+       <div   
                 ref={editorRef}
                 className="editor-area prose-studio px-6 lg:px-8"
                 contentEditable
                 suppressContentEditableWarning
                 data-placeholder="Start writing your blog… Select text to format. Drop images anywhere in the article."
-                onInput={onEdit}
-                onClick={handleEditorClick}
-                onBlur={saveSel}
+             onInput={onEdit}
+onClick={handleEditorClick}
+onMouseUp={handleTextSelection}
+onBlur={saveSel}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={async (e) => {
                   e.preventDefault();
@@ -2268,8 +2450,8 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         </div>
 
         {/* Right rail (desktop) */}
-        <div className="hidden xl:block w-[400px] shrink-0 px-4 lg:px-6 py-6 h-[calc(100vh-4rem)] min-h-0">
-          <div className="sticky top-16 h-full min-h-0">{rail}</div>
+        <div className="hidden xl:block w-[400px] shrink-0 self-start px-4 lg:px-6 py-6">
+          <div className="sticky top-20 h-[calc(100vh-5rem)] min-h-0">{rail}</div>
         </div>
       </div>
 
@@ -2790,7 +2972,7 @@ function EditorRail({
 }) {
   const kw = kwMetrics(form.seo.focusKeyword, keywords);
   return (
-    <Card className="h-full min-h-0 flex flex-col overflow-hidden">
+<Card className="sticky top-6 self-start max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden">
       <div className="shrink-0 border-b border-border px-4 pt-4 pb-0">
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="w-full h-9 justify-start bg-muted/60 p-1">
