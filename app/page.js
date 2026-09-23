@@ -333,7 +333,13 @@ export default function App() {
           return accessDenied(
             "Your role does not have permission to view analytics.",
           );
-        return <AnalyticsView initialTab={p.tab} key={p.tab} />;
+        return (
+          <AnalyticsView
+            initialTab={p.tab}
+            key={p.tab}
+            navigate={navigate}
+          />
+        );
       case "team":
         if (!can("team.view"))
           return accessDenied(

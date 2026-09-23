@@ -10,6 +10,7 @@ import { generateOutline, generateSeoMeta } from "../../../lib/gemini";
 import {
   getGoogleAnalytics,
   getSearchConsoleKeywords,
+  getGoogleIndexing,
 } from "../../../lib/google-analytics";
 import { deleteAsset, uploadBuffer } from "../../../lib/cloudinary";
 import {
@@ -189,10 +190,12 @@ async function syncMediaUsage(db, blog) {
 const TRANSITIONS = {
   draft: {
     in_review: { perm: "blogs.edit", label: "submitted for review" },
+    scheduled: { perm: "blogs.schedule", label: "scheduled" },
     published: { perm: "blogs.publish", label: "published" },
   },
   in_review: {
     approved: { perm: "blogs.publish", label: "approved" },
+    scheduled: { perm: "blogs.schedule", label: "scheduled" },
     draft: { perm: "blogs.edit", label: "sent back to draft" },
     published: { perm: "blogs.publish", label: "published" },
   },
@@ -203,12 +206,14 @@ const TRANSITIONS = {
     published: { perm: "blogs.publish", label: "published" },
   },
   scheduled: {
+    scheduled: { perm: "blogs.schedule", label: "rescheduled" },
     published: { perm: "blogs.publish", label: "published" },
     in_review: { perm: "blogs.edit", label: "sent back to review" },
     draft: { perm: "blogs.edit", label: "cancelled schedule" },
   },
   published: {
     published: { perm: "blogs.publish", label: "updated" },
+    scheduled: { perm: "blogs.schedule", label: "rescheduled" },
     in_review: { perm: "blogs.edit", label: "submitted for review" },
     draft: { perm: "blogs.edit", label: "moved to draft" },
     archived: { perm: "blogs.archive", label: "archived" },
@@ -2625,6 +2630,18 @@ async function handleRoute(request, { params }) {
           }),
         ),
       );
+    }
+
+    // ---------- GOOGLE INDEXING ----------
+    if (route === "/indexing" && method === "GET") {
+      const blogs = await db
+        .collection("blogs")
+        .find({ status: "published" })
+        .sort({ publishedAt: -1, updatedAt: -1 })
+        .toArray();
+
+      const result = await getGoogleIndexing(blogs);
+      return handleCORS(NextResponse.json(clean(result)));
     }
 
     // ---------- SEO ISSUES ----------
