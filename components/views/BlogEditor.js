@@ -244,6 +244,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const [outlineLoading, setOutlineLoading] = useState(false);
   const [generatingMeta, setGeneratingMeta] = useState(false);
   const [imgBar, setImgBar] = useState(null); // selected img element info
+  const [imgBarPos, setImgBarPos] = useState({ top: 0, left: 0 });
   const [linkBar, setLinkBar] = useState(null); // { el, href, text }
   const [highlight, setHighlight] = useState(null);
   const [seoSheetOpen, setSeoSheetOpen] = useState(false);
@@ -755,49 +756,52 @@ function applyFontWeight(weight) {
   
   // image & link selection inside editor
   function handleEditorClick(e) {
-    // Handle clicking links
-    const a = e.target.closest && e.target.closest("a");
-    if (a && editorRef.current?.contains(a)) {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const href = a.getAttribute("href");
-        if (href) {
-          window.open(
-            href.startsWith("http") ? href : window.location.origin + href,
-            "_blank",
-          );
-        }
-        return;
-      }
-      setLinkBar({
-        el: a,
-        href: a.getAttribute("href") || "",
-        text: a.textContent || "",
-      });
-    } else {
-      setLinkBar(null);
-    }
+  // Handle clicking links
+const img = e.target.closest && e.target.closest("img");
 
-    const img = e.target.closest && e.target.closest("img");
-    if (editorRef.current)
-      editorRef.current
-        .querySelectorAll("img.ss-img-selected")
-        .forEach((i) => i.classList.remove("ss-img-selected"));
-    if (img && editorRef.current.contains(img)) {
-      img.classList.add("ss-img-selected");
-      const fig = img.closest("figure");
-      setImgBar({
-        img,
-        fig,
-        src: img.getAttribute("src"),
-        alt: img.getAttribute("alt") || "",
-        caption: fig
-          ? (fig.querySelector("figcaption") || {}).textContent || ""
-          : "",
-      });
-    } else setImgBar(null);
+if (editorRef.current) {
+  editorRef.current
+    .querySelectorAll("img.ss-img-selected")
+    .forEach((i) => i.classList.remove("ss-img-selected"));
+}
+
+if (img && editorRef.current.contains(img)) {
+  img.classList.add("ss-img-selected");
+
+  const fig = img.closest("figure");
+
+  setImgBar({
+    img,
+    fig,
+    src: img.getAttribute("src"),
+    alt: img.getAttribute("alt") || "",
+    caption: fig
+      ? (fig.querySelector("figcaption") || {}).textContent || ""
+      : "",
+  });
+
+const rect = img.getBoundingClientRect();
+const editorRect = editorRef.current.getBoundingClientRect();
+const parentRect = editorRef.current.parentElement.getBoundingClientRect();
+
+setImgBarPos({
+  top:
+    rect.top -
+    parentRect.top +
+    editorRef.current.scrollTop -
+    48,
+
+  left:
+    rect.left -
+    parentRect.left +
+    editorRef.current.scrollLeft,
+});
+  } else {
+    setImgBar(null);
   }
+}
 
+  
 
 function handleTextSelection() {
   const sel = window.getSelection();
@@ -1956,7 +1960,7 @@ useEffect(() => {
 
           {/* Content editor */}
           <Card>
-            <CardContent className="p-0">
+            <CardContent className="p-0 relative">
               <div className="flex items-center justify-between px-4 pt-4">
                 <h2 className="text-[15px] font-semibold">Content</h2>
                 <span className="text-[11.5px] text-muted-foreground">
@@ -2137,8 +2141,14 @@ useEffect(() => {
               </div>
 
               {/* Image options bar */}
-              {imgBar && (
-                <div className="mx-4 mt-2 rounded-lg border border-violet-200 bg-violet-50/70 dark:border-violet-900 dark:bg-violet-950/30 px-3 py-2 flex flex-wrap items-center gap-2 text-xs">
+             {imgBar && (
+  <div
+    className="absolute z-50 rounded-lg border border-violet-200 bg-violet-50/95 dark:border-violet-900 dark:bg-violet-950/95 px-3 py-2 flex flex-wrap items-center gap-2 text-xs shadow-md"
+     style={{
+    top: imgBarPos.top,
+    left: imgBarPos.left,
+  }}
+  >
                   <ImageIcon className="h-4 w-4 text-violet-500" />
                   <span className="font-semibold">Image selected</span>
                   <Separator orientation="vertical" className="h-4" />
@@ -2437,7 +2447,7 @@ useEffect(() => {
 
        <div   
                 ref={editorRef}
-                className="editor-area prose-studio px-6 lg:px-8"
+                className="editor-area prose-studio px-6 lg:px-8  max-w-full overflow-x-hidden"
                 contentEditable
                 suppressContentEditableWarning
                 data-placeholder="Start writing your blog… Select text to format. Drop images anywhere in the article."
