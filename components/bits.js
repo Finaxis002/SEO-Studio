@@ -338,6 +338,7 @@ export function ChipInput({
   onChange,
   placeholder = "Add and press Enter…",
   className = "",
+  onChipClick,
 }) {
   const [draft, setDraft] = useState("");
   const commit = () => {
@@ -357,7 +358,17 @@ export function ChipInput({
           key={t}
           className="inline-flex items-center gap-1 rounded-md bg-violet-50 border border-violet-200 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-900 pl-2 pr-1 py-0.5 text-xs font-medium"
         >
-          {t}
+          {onChipClick ? (
+            <button
+              type="button"
+              className="hover:underline cursor-pointer"
+              onClick={() => onChipClick(t)}
+            >
+              {t}
+            </button>
+          ) : (
+            t
+          )}
           <button
             type="button"
             className="hover:bg-violet-200/60 dark:hover:bg-violet-900 rounded p-0.5"
