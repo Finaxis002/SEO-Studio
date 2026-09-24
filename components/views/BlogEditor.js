@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
@@ -58,6 +58,8 @@ import {
   ListTree,
   ChevronRight,
   Clock,
+  Check,
+  CheckCheck,
   X,
   Plus,
   Hash,
@@ -127,6 +129,55 @@ import {
 } from "../bits";
 
 // ---------- helpers ----------
+
+function insertSuggestionsIntoHtml(baseHtml, introPara, internalLink) {
+  let html = baseHtml || "";
+
+  if (introPara && introPara.trim()) {
+    const cleanIntro = `<p>${introPara.trim()}</p>`;
+    const firstParaMatch = html.match(/<p[^>]*>[\s\S]*?<\/p>/i);
+    if (firstParaMatch) {
+      html = html.replace(/<p[^>]*>[\s\S]*?<\/p>/i, cleanIntro);
+    } else {
+      html = cleanIntro + (html ? `<br/>${html}` : "");
+    }
+  }
+
+  if (internalLink) {
+    const slug = internalLink.targetSlug || internalLink.slug;
+    const title =
+      internalLink.targetTitle || internalLink.anchorText || "related guide";
+    const sentence = internalLink.sentence || internalLink.contextSentence;
+
+    let linkSentence = "";
+    if (sentence && sentence.includes("<a href=")) {
+      // Normalize /blog/ to /blogs/ for Vinimay website
+      const normalizedSentence = sentence
+        .replace(/href=["']\/blog\/([^"']+)["']/gi, 'href="/blogs/$1"')
+        .replace(
+          /href=["']https?:\/\/vinimay\.sharda\.co\.in\/blog\/([^"']+)["']/gi,
+          'href="/blogs/$1"',
+        );
+      linkSentence = `<p>${normalizedSentence}</p>`;
+    } else if (sentence && slug) {
+      linkSentence = `<p>${sentence} <a href="/blogs/${slug}">${title}</a>.</p>`;
+    } else if (slug) {
+      linkSentence = `<p>Read more: <a href="/blogs/${slug}">${title}</a>.</p>`;
+    }
+
+    if (linkSentence) {
+      const firstParaMatch = html.match(/<p[^>]*>[\s\S]*?<\/p>/i);
+      if (firstParaMatch) {
+        const idx = html.indexOf(firstParaMatch[0]) + firstParaMatch[0].length;
+        html = html.slice(0, idx) + linkSentence + html.slice(idx);
+      } else {
+        html = html + linkSentence;
+      }
+    }
+  }
+
+  return html;
+}
 
 function renderFigure(url, alt, caption, width, align) {
   let style = "";
@@ -249,6 +300,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const [imgBar, setImgBar] = useState(null); // selected img element info
   const [imgBarPos, setImgBarPos] = useState({ top: 0, left: 0 });
   const [linkBar, setLinkBar] = useState(null); // { el, href, text }
+  const [linkBarPos, setLinkBarPos] = useState({ top: 0, left: 0 });
   const [highlight, setHighlight] = useState(null);
   const [seoSheetOpen, setSeoSheetOpen] = useState(false);
   const [relatedKeywordsOpen, setRelatedKeywordsOpen] = useState(false);
@@ -472,13 +524,79 @@ const documentInputRef = useRef(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
+  const publishedSlugs = useMemo(
+    () =>
+      (allBlogs?.items || [])
+        .filter((b) => b.status === "published" && b.slug)
+        .map((b) => b.slug.toLowerCase().trim()),
+    [allBlogs],
+  );
+
+  const inArticleLinks = useMemo(() => {
+    const html = form.contentHtml || "";
+    const matches = [
+      ...html.matchAll(
+        /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+      ),
+    ];
+    const allBlogsList = allBlogs?.items || [];
+    return matches.map((m, idx) => {
+      const href = m[1];
+      const text = m[2].replace(/<[^>]+>/g, "").trim() || href;
+      const isInternal =
+        href.startsWith("/") ||
+        href.startsWith("#") ||
+        href.includes("vinimay.sharda.co.in");
+      const isBlog =
+        /^\/(?:blogs|blog)\//i.test(href) ||
+        /https?:\/\/vinimay\.sharda\.co\.in\/(?:blogs|blog)\//i.test(href);
+
+      let status = "external";
+      if (isInternal) {
+        if (isBlog) {
+          const linkSlug = href
+            .replace(/^https?:\/\/vinimay\.sharda\.co\.in/i, "")
+            .replace(/^\/(?:blogs|blog)\//i, "")
+            .replace(/\/$/, "")
+            .trim()
+            .toLowerCase();
+          const foundBlog = allBlogsList.find(
+            (b) => b.slug?.toLowerCase().trim() === linkSlug,
+          );
+          if (publishedSlugs.includes(linkSlug)) {
+            status = "live";
+          } else if (foundBlog) {
+            status = "draft";
+          } else {
+            status = "broken_404";
+          }
+        } else {
+          status = "vinimay_page";
+        }
+      }
+      return {
+        id: idx,
+        href,
+        text,
+        status,
+        isInternal,
+        targetUrl: href.startsWith("http")
+          ? href
+          : `https://vinimay.sharda.co.in${href.startsWith("/") ? "" : "/"}${href}`,
+      };
+    });
+  }, [form.contentHtml, allBlogs, publishedSlugs]);
+
   const analysis = useMemo(
     () =>
-      analyzeSeo({
-        ...form,
-        seo: { ...form.seo, metaTitle: form.seo.metaTitle || form.title },
-      }),
-    [form],
+      analyzeSeo(
+        {
+          ...form,
+          seo: { ...form.seo, metaTitle: form.seo.metaTitle || form.title },
+        },
+        publishedSlugs,
+      ),
+    [form, publishedSlugs],
   );
   const wc = analysis.stats.words;
 
@@ -492,32 +610,206 @@ const documentInputRef = useRef(null);
     if (!seoSuggestions) return null;
     const s = seoSuggestions;
     const sel = selectedSuggestions;
-    let simHtml = form.contentHtml || "";
-    if (sel.introParagraph && s.introParagraph) {
-      simHtml = simHtml.replace(/^<p>[\s\S]*?<\/p>/, `<p>${s.introParagraph}</p>`);
-    }
-    if (sel.internalLink && s.internalLink) {
-      simHtml = simHtml.replace(
-        /^(<p>[\s\S]*?<\/p>)/,
-        `$1<p><a href="/blog/${s.internalLink.slug}">${s.internalLink.targetTitle}</a></p>`,
-      );
-    }
+    const simHtml = insertSuggestionsIntoHtml(
+      editorRef.current ? editorRef.current.innerHTML : form.contentHtml || "",
+      sel.introParagraph ? s.introParagraph : null,
+      sel.internalLink ? s.internalLink : null,
+    );
     const simForm = {
       ...form,
       contentHtml: simHtml,
       slug: sel.slug && s.slug ? s.slug : form.slug,
       seo: {
         ...form.seo,
-        metaTitle: sel.seoTitle && s.seoTitle ? s.seoTitle : form.seo.metaTitle || form.title,
-        focusKeyword: sel.focusKeyword && s.focusKeyword ? s.focusKeyword : form.seo.focusKeyword,
-        metaDescription: sel.metaDescription && s.metaDescription ? s.metaDescription : form.seo.metaDescription,
-        secondaryKeywords: sel.secondaryKeywords && s.secondaryKeywords
-          ? Array.from(new Set([...(form.seo.secondaryKeywords || []), ...s.secondaryKeywords]))
-          : form.seo.secondaryKeywords,
+        metaTitle:
+          sel.seoTitle && s.seoTitle
+            ? s.seoTitle
+            : form.seo?.metaTitle || form.title,
+        focusKeyword:
+          sel.focusKeyword && s.focusKeyword
+            ? s.focusKeyword
+            : form.seo?.focusKeyword,
+        metaDescription:
+          sel.metaDescription && s.metaDescription
+            ? s.metaDescription
+            : form.seo?.metaDescription,
+        secondaryKeywords:
+          sel.secondaryKeywords && s.secondaryKeywords
+            ? Array.from(
+                new Set([
+                  ...(form.seo?.secondaryKeywords || []),
+                  ...(Array.isArray(s.secondaryKeywords)
+                    ? s.secondaryKeywords
+                    : [s.secondaryKeywords]),
+                ]),
+              )
+            : form.seo?.secondaryKeywords,
       },
     };
-    return analyzeSeo(simForm);
-  }, [seoSuggestions, selectedSuggestions, form]);
+    return analyzeSeo(simForm, publishedSlugs);
+  }, [seoSuggestions, selectedSuggestions, form, publishedSlugs]);
+
+  const boostBreakdown = useMemo(() => {
+    if (!projectedAnalysis) return { boost: 0, projected: analysis.score };
+    const projectedScore = projectedAnalysis.score;
+    const boost = Math.max(0, projectedScore - analysis.score);
+    return {
+      boost,
+      projected: projectedScore,
+    };
+  }, [projectedAnalysis, analysis.score]);
+
+  const actionableCards = useMemo(() => {
+    if (!seoSuggestions) return [];
+    const s = seoSuggestions;
+
+    let keywordWarning = null;
+    if (
+      s.focusKeyword &&
+      form.seo?.focusKeyword &&
+      s.focusKeyword.toLowerCase().trim() !== form.seo.focusKeyword.toLowerCase().trim()
+    ) {
+      const testScore = analyzeSeo(
+        {
+          ...form,
+          seo: { ...form.seo, focusKeyword: s.focusKeyword },
+        },
+        publishedSlugs,
+      ).score;
+      if (testScore < analysis.score) {
+        keywordWarning = `Changing focus keyword lowers score from ${analysis.score} to ${testScore} because "${s.focusKeyword}" is not yet in the body text. Skipped by default to protect your score.`;
+      }
+    }
+
+    const cards = [
+      {
+        key: "focusKeyword",
+        label: "Focus Keyword",
+        badge: keywordWarning ? "Score Risk (Skipped)" : "Primary Target",
+        charHint: null,
+        current: form.seo?.focusKeyword || "(Not set)",
+        suggested: s.focusKeyword,
+        warning: keywordWarning,
+      },
+      {
+        key: "seoTitle",
+        label: "SEO Title (SERP)",
+        badge: null,
+        charHint: s.seoTitle ? `${s.seoTitle.length} / 60 chars` : null,
+        current: form.seo?.metaTitle || form.title || "(Not set)",
+        suggested: s.seoTitle,
+      },
+      {
+        key: "slug",
+        label: "URL Slug",
+        badge: "SEO Friendly",
+        charHint: null,
+        current: form.slug || "(Not set)",
+        suggested: s.slug,
+      },
+      {
+        key: "introParagraph",
+        label: "Intro Paragraph",
+        badge: "+7 pts",
+        charHint: null,
+        current: null,
+        suggested: s.introParagraph,
+      },
+      {
+        key: "metaDescription",
+        label: "Meta Description",
+        badge: null,
+        charHint: s.metaDescription ? `${s.metaDescription.length} / 160 chars` : null,
+        current: form.seo?.metaDescription || "(Not set)",
+        suggested: s.metaDescription,
+      },
+      {
+        key: "secondaryKeywords",
+        label: "Related Keywords",
+        badge: "LSI Terms",
+        charHint: null,
+        current: (form.seo?.secondaryKeywords || []).join(", ") || "(Not set)",
+        suggested: Array.isArray(s.secondaryKeywords)
+          ? s.secondaryKeywords.join(", ")
+          : s.secondaryKeywords,
+      },
+      {
+        key: "internalLink",
+        label: "Internal Link",
+        badge: "Link Building",
+        charHint: null,
+        current: null,
+        suggested: s.internalLink
+          ? `→ "${s.internalLink.targetTitle || s.internalLink.anchorText || "related guide"}" (/blogs/${s.internalLink.targetSlug || s.internalLink.slug})`
+          : null,
+        extra: s.internalLink?.sentence || s.internalLink?.contextSentence,
+      },
+    ];
+
+    return cards.filter((card) => {
+      if (!card.suggested) return false;
+
+      if (card.key === "internalLink") {
+        if (!s.internalLink) return false;
+        const linkSlug = s.internalLink.targetSlug || s.internalLink.slug;
+        if (
+          linkSlug &&
+          form.contentHtml &&
+          form.contentHtml.toLowerCase().includes(linkSlug.toLowerCase())
+        ) {
+          return false;
+        }
+        return true;
+      }
+
+      if (card.key === "introParagraph") {
+        if (!s.introParagraph) return false;
+        if (
+          form.contentHtml &&
+          form.contentHtml.toLowerCase().includes(s.introParagraph.trim().toLowerCase())
+        ) {
+          return false;
+        }
+        return true;
+      }
+
+      if (card.key === "secondaryKeywords") {
+        const currentSec = (form.seo?.secondaryKeywords || []).map((k) =>
+          k.trim().toLowerCase()
+        ).filter(Boolean);
+        const suggestedSec = (
+          Array.isArray(s.secondaryKeywords)
+            ? s.secondaryKeywords
+            : (s.secondaryKeywords || "").split(",")
+        ).map((k) => k.trim().toLowerCase()).filter(Boolean);
+
+        if (
+          suggestedSec.length > 0 &&
+          suggestedSec.every((k) => currentSec.includes(k))
+        ) {
+          return false;
+        }
+        return true;
+      }
+
+      if (card.key === "slug") {
+        const curSlug = (form.slug || "").replace(/^\/+/, "").trim().toLowerCase();
+        const sugSlug = (s.slug || "").replace(/^\/+/, "").trim().toLowerCase();
+        if (curSlug && sugSlug && curSlug === sugSlug) {
+          return false;
+        }
+        return true;
+      }
+
+      if (card.current && card.current !== "(Not set)" && card.suggested) {
+        if (card.current.trim().toLowerCase() === card.suggested.trim().toLowerCase()) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [seoSuggestions, form.seo, form.title, form.slug, form.contentHtml]);
 
   async function fetchSeoSuggestions() {
     if (!hasSeoInput) return;
@@ -526,9 +818,14 @@ const documentInputRef = useRef(null);
       const failingChecks = (analysis.checks || [])
         .filter((c) => !c.ok)
         .map((c) => `${c.label}: ${c.fix}`);
+      // Only include PUBLISHED blogs so internal links NEVER 404 on live website
       const existingBlogs = (allBlogs?.items || [])
-        .filter((b) => b.id !== form.id && b.slug)
-        .map((b) => ({ title: b.title, slug: b.slug, keyword: b.seo?.focusKeyword || "" }));
+        .filter((b) => b.id !== form.id && b.slug && b.status === "published")
+        .map((b) => ({
+          title: b.title,
+          slug: b.slug,
+          keyword: b.seo?.focusKeyword || "",
+        }));
       const res = await api("/suggest-seo-alignment", {
         method: "POST",
         body: {
@@ -538,13 +835,34 @@ const documentInputRef = useRef(null);
           contentHtml: form.contentHtml,
           metaDescription: form.seo.metaDescription,
           secondaryKeywords: form.seo.secondaryKeywords,
+          currentScore: analysis.score,
           failingChecks,
           existingBlogs,
         },
       });
       setSeoSuggestions(res);
+
+      // Protect established keyword if changing it lowers the SEO score
+      let includeFocusKeyword = true;
+      if (
+        res.focusKeyword &&
+        form.seo?.focusKeyword &&
+        res.focusKeyword.toLowerCase().trim() !== form.seo.focusKeyword.toLowerCase().trim()
+      ) {
+        const testWithNewKw = analyzeSeo(
+          {
+            ...form,
+            seo: { ...form.seo, focusKeyword: res.focusKeyword },
+          },
+          publishedSlugs,
+        );
+        if (testWithNewKw.score < analysis.score) {
+          includeFocusKeyword = false;
+        }
+      }
+
       setSelectedSuggestions({
-        focusKeyword: true,
+        focusKeyword: includeFocusKeyword,
         seoTitle: true,
         slug: true,
         introParagraph: true,
@@ -567,17 +885,11 @@ const documentInputRef = useRef(null);
 
     // Build updated contentHtml
     let html = editorRef.current ? editorRef.current.innerHTML : form.contentHtml || "";
-    if (sel.introParagraph && s.introParagraph) {
-      html = html.replace(/^<p>[\s\S]*?<\/p>/, `<p>${s.introParagraph}</p>`);
-    }
-    if (sel.internalLink && s.internalLink) {
-      const linkSentence = s.internalLink.contextSentence ||
-        `Read more: <a href="/blog/${s.internalLink.slug}">${s.internalLink.targetTitle}</a>`;
-      html = html.replace(
-        /^(<p>[\s\S]*?<\/p>)/,
-        `$1<p>${linkSentence}</p>`,
-      );
-    }
+    html = insertSuggestionsIntoHtml(
+      html,
+      sel.introParagraph ? s.introParagraph : null,
+      sel.internalLink ? s.internalLink : null,
+    );
 
     // Build updated SEO object
     const seoUpdates = {};
@@ -594,7 +906,10 @@ const documentInputRef = useRef(null);
     }
     if (sel.secondaryKeywords && s.secondaryKeywords) {
       seoUpdates.secondaryKeywords = Array.from(
-        new Set([...(form.seo.secondaryKeywords || []), ...s.secondaryKeywords]),
+        new Set([
+          ...(form.seo?.secondaryKeywords || []),
+          ...(Array.isArray(s.secondaryKeywords) ? s.secondaryKeywords : [s.secondaryKeywords]),
+        ]),
       );
     }
 
@@ -604,10 +919,13 @@ const documentInputRef = useRef(null);
       formUpdates.slugEdited = true;
     }
     up(formUpdates);
-    if (editorRef.current) editorRef.current.innerHTML = html;
+    if (editorRef.current) {
+      editorRef.current.innerHTML = html;
+    }
 
     setSeoSuggestOpen(false);
     toast.success("AI SEO suggestions applied!");
+    onEdit();
   }
 
   // Autosave (only for drafts, not for published blogs to prevent accidental live changes)
@@ -645,6 +963,20 @@ const documentInputRef = useRef(null);
     }
     setSaving(true);
     try {
+      let rawHtml = editorRef.current
+        ? editorRef.current.innerHTML
+        : form.contentHtml;
+      // Auto-normalize any legacy /blog/ links to /blogs/ for Vinimay website
+      const sanitizedHtml = (rawHtml || "")
+        .replace(/href=["']\/blog\/([^"']+)["']/gi, 'href="/blogs/$1"')
+        .replace(
+          /href=["']https?:\/\/vinimay\.sharda\.co\.in\/blog\/([^"']+)["']/gi,
+          'href="/blogs/$1"',
+        );
+      if (editorRef.current && editorRef.current.innerHTML !== sanitizedHtml) {
+        editorRef.current.innerHTML = sanitizedHtml;
+      }
+
       const payload = {
         title: form.title,
         slug: form.slug || slugify(form.title),
@@ -653,10 +985,12 @@ const documentInputRef = useRef(null);
         author: form.author || user?.name,
         tags: form.tags,
         featuredImage: form.featuredImage,
-        contentHtml: editorRef.current
-          ? editorRef.current.innerHTML
-          : form.contentHtml,
-        seo: { ...form.seo, metaTitle: form.seo.metaTitle || form.title },
+        contentHtml: sanitizedHtml,
+        seo: {
+          ...form.seo,
+          score: analysis.score,
+          metaTitle: form.seo.metaTitle || form.title,
+        },
         brief: form.brief,
         savedSuggestions: form.savedSuggestions,
         publishedAt: form.publishedAt !== undefined ? form.publishedAt : null,
@@ -664,7 +998,12 @@ const documentInputRef = useRef(null);
       if (id) {
         const b = await api("/blogs/" + id, { method: "PUT", body: payload });
         setLastSaved(b.updatedAt);
-        setForm((f) => ({ ...f, slug: b.slug }));
+        setForm((f) => ({
+          ...f,
+          slug: b.slug,
+          seo: { ...f.seo, score: b.seo?.score ?? analysis.score },
+        }));
+        window.dispatchEvent(new Event("ss-refresh"));
         return b.id;
       } else {
         const b = await api("/blogs", { method: "POST", body: payload });
@@ -900,50 +1239,212 @@ function applyFontWeight(weight) {
   
   // image & link selection inside editor
   function handleEditorClick(e) {
-  // Handle clicking links
-const img = e.target.closest && e.target.closest("img");
+    if (editorRef.current) {
+      editorRef.current
+        .querySelectorAll("img.ss-img-selected")
+        .forEach((i) => i.classList.remove("ss-img-selected"));
+    }
 
-if (editorRef.current) {
-  editorRef.current
-    .querySelectorAll("img.ss-img-selected")
-    .forEach((i) => i.classList.remove("ss-img-selected"));
-}
+    // 1. Handle clicking links inside the editor
+    const a = e.target.closest && e.target.closest("a");
+    if (a && editorRef.current && editorRef.current.contains(a)) {
+      e.preventDefault();
+      let href = a.getAttribute("href") || "";
 
-if (img && editorRef.current.contains(img)) {
-  img.classList.add("ss-img-selected");
+      // Auto-migrate legacy /blog/ to /blogs/ for Vinimay website
+      if (/^\/blog\//i.test(href)) {
+        href = href.replace(/^\/blog\//i, "/blogs/");
+        a.setAttribute("href", href);
+      } else if (/^https?:\/\/vinimay\.sharda\.co\.in\/blog\//i.test(href)) {
+        href = href.replace(
+          /^https?:\/\/vinimay\.sharda\.co\.in\/blog\//i,
+          "https://vinimay.sharda.co.in/blogs/",
+        );
+        a.setAttribute("href", href);
+      }
 
-  const fig = img.closest("figure");
+      const isInternal =
+        href.startsWith("/") ||
+        href.startsWith("#") ||
+        href.includes("vinimay.sharda.co.in");
 
-  setImgBar({
-    img,
-    fig,
-    src: img.getAttribute("src"),
-    alt: img.getAttribute("alt") || "",
-    caption: fig
-      ? (fig.querySelector("figcaption") || {}).textContent || ""
-      : "",
-  });
+      const isBlog =
+        /^\/(?:blogs|blog)\//i.test(href) ||
+        /https?:\/\/vinimay\.sharda\.co\.in\/(?:blogs|blog)\//i.test(href);
 
-const rect = img.getBoundingClientRect();
-const editorRect = editorRef.current.getBoundingClientRect();
-const parentRect = editorRef.current.parentElement.getBoundingClientRect();
+      let status = "external";
+      if (isInternal) {
+        if (isBlog) {
+          const linkSlug = href
+            .replace(/^https?:\/\/vinimay\.sharda\.co\.in/i, "")
+            .replace(/^\/(?:blogs|blog)\//i, "")
+            .replace(/\/$/, "")
+            .trim()
+            .toLowerCase();
+          const allBlogsList = allBlogs?.items || [];
+          const foundBlog = allBlogsList.find(
+            (b) => b.slug?.toLowerCase().trim() === linkSlug,
+          );
+          if (publishedSlugs.includes(linkSlug)) {
+            status = "live";
+          } else if (foundBlog) {
+            status = "draft";
+          } else {
+            status = "broken_404";
+          }
+        } else {
+          status = "vinimay_page";
+        }
+      }
 
-setImgBarPos({
-  top:
-    rect.top -
-    parentRect.top +
-    editorRef.current.scrollTop -
-    48,
+      const rect = a.getBoundingClientRect();
+      const parentRect = editorRef.current.parentElement.getBoundingClientRect();
 
-  left:
-    rect.left -
-    parentRect.left +
-    editorRef.current.scrollLeft,
-});
-  } else {
-    setImgBar(null);
+      setLinkBarPos({
+        top: Math.max(
+          8,
+          rect.top - parentRect.top + editorRef.current.scrollTop - 46,
+        ),
+        left: Math.max(
+          12,
+          Math.min(
+            rect.left - parentRect.left + editorRef.current.scrollLeft,
+            parentRect.width - 340,
+          ),
+        ),
+      });
+
+      setLinkBar({
+        el: a,
+        href,
+        text: a.textContent || "",
+        status,
+        targetUrl: href.startsWith("http")
+          ? href
+          : `https://vinimay.sharda.co.in${href.startsWith("/") ? "" : "/"}${href}`,
+      });
+      setImgBar(null);
+      return;
+    }
+
+    // 2. Handle clicking images inside editor
+    const img = e.target.closest && e.target.closest("img");
+    if (img && editorRef.current && editorRef.current.contains(img)) {
+      img.classList.add("ss-img-selected");
+      const fig = img.closest("figure");
+      setImgBar({
+        img,
+        fig,
+        src: img.getAttribute("src"),
+        alt: img.getAttribute("alt") || "",
+        caption: fig
+          ? (fig.querySelector("figcaption") || {}).textContent || ""
+          : "",
+      });
+
+      const rect = img.getBoundingClientRect();
+      const parentRect = editorRef.current.parentElement.getBoundingClientRect();
+      setImgBarPos({
+        top:
+          rect.top -
+          parentRect.top +
+          editorRef.current.scrollTop -
+          48,
+        left:
+          rect.left -
+          parentRect.left +
+          editorRef.current.scrollLeft,
+      });
+      setLinkBar(null);
+    } else {
+      setImgBar(null);
+      setLinkBar(null);
+    }
   }
-}
+
+  // Hover indicator for live link preview
+  function handleEditorMouseOver(e) {
+    const a = e.target.closest && e.target.closest("a");
+    if (a && editorRef.current && editorRef.current.contains(a)) {
+      const href = a.getAttribute("href") || "";
+      const isInternal =
+        href.startsWith("/") ||
+        href.startsWith("#") ||
+        href.includes("vinimay.sharda.co.in");
+      const isBlog =
+        /^\/(?:blogs|blog)\//i.test(href) ||
+        /https?:\/\/vinimay\.sharda\.co\.in\/(?:blogs|blog)\//i.test(href);
+
+      if (isInternal) {
+        if (isBlog) {
+          const linkSlug = href
+            .replace(/^https?:\/\/vinimay\.sharda\.co\.in/i, "")
+            .replace(/^\/(?:blogs|blog)\//i, "")
+            .replace(/\/$/, "")
+            .trim()
+            .toLowerCase();
+          if (publishedSlugs.includes(linkSlug)) {
+            a.title = `[✓ Live Blog] ${href} (Click to open floating options)`;
+          } else {
+            const allBlogsList = allBlogs?.items || [];
+            const foundBlog = allBlogsList.find(
+              (b) => b.slug?.toLowerCase().trim() === linkSlug,
+            );
+            if (foundBlog) {
+              a.title = `[⚠ Draft Blog] ${href} (Draft - not yet live on site)`;
+            } else {
+              a.title = `[✕ 404 NOT FOUND] ${href} - No published blog exists with this slug!`;
+            }
+          }
+        } else {
+          a.title = `[✓ Vinimay Page] ${href} (Click to open floating options)`;
+        }
+      } else {
+        a.title = `[External Link] ${href}`;
+      }
+    }
+  }
+
+  // Jump to and highlight a specific link in the editor
+  function jumpToLink(href) {
+    if (!editorRef.current) return;
+    const a =
+      editorRef.current.querySelector(`a[href="${href}"]`) ||
+      editorRef.current.querySelector(
+        `a[href="${href.replace('/blogs/', '/blog/')}"]`,
+      );
+    if (a) {
+      a.scrollIntoView({ behavior: "smooth", block: "center" });
+      a.classList.add("ring-2", "ring-violet-500", "ring-offset-2");
+      setTimeout(() => {
+        a.classList.remove("ring-2", "ring-violet-500", "ring-offset-2");
+      }, 2000);
+      const rect = a.getBoundingClientRect();
+      const parentRect = editorRef.current.parentElement.getBoundingClientRect();
+      setLinkBarPos({
+        top: Math.max(
+          8,
+          rect.top - parentRect.top + editorRef.current.scrollTop - 46,
+        ),
+        left: Math.max(
+          12,
+          Math.min(
+            rect.left - parentRect.left + editorRef.current.scrollLeft,
+            parentRect.width - 340,
+          ),
+        ),
+      });
+      setLinkBar({
+        el: a,
+        href,
+        text: a.textContent || "",
+        status: "live",
+        targetUrl: href.startsWith("http")
+          ? href
+          : `https://vinimay.sharda.co.in${href.startsWith("/") ? "" : "/"}${href}`,
+      });
+    }
+  }
 
   
 
@@ -1199,7 +1700,7 @@ const handleDocumentImport = async (e) => {
         const relevance = words.length
           ? Math.min(97, Math.round((hits / words.length) * 100) + 42)
           : 50;
-        return { id: b.id, title: b.title, url: "/blog/" + b.slug, relevance };
+        return { id: b.id, title: b.title, url: "/blogs/" + b.slug, relevance };
       })
       .filter((s) => !dismissed.includes(s.id))
       .sort((a, b) => b.relevance - a.relevance)
@@ -1623,6 +2124,9 @@ useEffect(() => {
       fetchSeoSuggestions={fetchSeoSuggestions}
       seoSuggestLoading={seoSuggestLoading}
       allBlogs={allBlogs?.items || []}
+      publishedSlugs={publishedSlugs}
+      inArticleLinks={inArticleLinks}
+      onJumpToLink={jumpToLink}
     />
   );
 
@@ -1974,7 +2478,7 @@ useEffect(() => {
                 <Labeled label="URL slug">
                   <div className="flex items-center rounded-md border border-input bg-muted/30 shadow-sm focus-within:ring-2 focus-within:ring-ring/30">
                     <span className="pl-3 text-[13px] text-muted-foreground select-none">
-                      /blog/
+                      /blogs/
                     </span>
                     <Input
                       id="f-slug"
@@ -2291,10 +2795,12 @@ useEffect(() => {
                 </ToolBtn>
                 <Separator orientation="vertical" className="h-5 mx-0.5" />
                 <ToolBtn
-                  title="Insert link"
+                  title="Insert link (Ctrl+K)"
                   onClick={() => {
                     saveSel();
-                    setLinkDialog({ url: "", text: "", newTab: true });
+                    const sel = window.getSelection();
+                    const selectedText = sel ? sel.toString().trim() : "";
+                    setLinkDialog({ url: "", text: selectedText, newTab: true });
                   }}
                 >
                   <Link2 className="h-4 w-4" />
@@ -2501,33 +3007,65 @@ useEffect(() => {
                 </div>
               )}
 
-              {/* Link options bar */}
+              {/* Floating Link options bar — positioned right above the clicked link */}
               {linkBar && (
-                <div className="mx-4 mt-2 rounded-lg border border-sky-200 bg-sky-50/90 dark:border-sky-900 dark:bg-sky-950/40 px-3 py-2 flex flex-wrap items-center gap-2 text-xs animate-in fade-in duration-150">
+                <div
+                  className="absolute z-50 rounded-xl border border-sky-300/80 bg-white/95 dark:border-sky-700/80 dark:bg-zinc-900/95 px-3 py-2 flex flex-wrap items-center gap-2 text-xs shadow-xl backdrop-blur animate-in fade-in zoom-in-95 duration-150"
+                  style={{
+                    top: linkBarPos.top,
+                    left: linkBarPos.left,
+                  }}
+                >
                   <Link2 className="h-4 w-4 text-sky-500 shrink-0" />
                   <span
-                    className="font-semibold text-foreground truncate max-w-[200px] sm:max-w-xs md:max-w-md"
+                    className="font-mono text-[11.5px] font-medium text-foreground truncate max-w-[170px] sm:max-w-xs"
                     title={linkBar.href}
                   >
                     {linkBar.href}
                   </span>
+
+                  {/* Health Status Badges */}
+                  {linkBar.status === "live" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      ✓ Live Blog
+                    </span>
+                  )}
+                  {linkBar.status === "vinimay_page" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                      ✓ Vinimay Page
+                    </span>
+                  )}
+                  {linkBar.status === "draft" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                      ⚠ Draft Blog
+                    </span>
+                  )}
+                  {linkBar.status === "broken_404" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                      ✕ 404 Not Found
+                    </span>
+                  )}
+                  {linkBar.status === "external" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+                      External
+                    </span>
+                  )}
+
                   <Separator orientation="vertical" className="h-4" />
+
+                  {/* Destination button opens real website */}
                   <Button
                     size="sm"
                     variant="ghost"
                     className="h-7 text-xs text-sky-700 hover:text-sky-800 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900/50"
                     onClick={() => {
-                      window.open(
-                        linkBar.href.startsWith("http")
-                          ? linkBar.href
-                          : window.location.origin + linkBar.href,
-                        "_blank",
-                      );
+                      window.open(linkBar.targetUrl, "_blank");
                     }}
                   >
                     <ExternalLink className="h-3.5 w-3.5 mr-1" />
-                    Open link ↗
+                    Open {linkBar.status === "vinimay_page" ? "Page" : "Target"} ↗
                   </Button>
+
                   <Button
                     size="sm"
                     variant="ghost"
@@ -2536,12 +3074,14 @@ useEffect(() => {
                       setLinkDialog({
                         url: linkBar.href,
                         text: linkBar.text,
+                        editAnchor: linkBar.el,
                         newTab: linkBar.el.getAttribute("target") === "_blank",
                       });
                     }}
                   >
-                    Edit link
+                    Edit URL
                   </Button>
+
                   <Button
                     size="sm"
                     variant="ghost"
@@ -2564,13 +3104,11 @@ useEffect(() => {
                     <Link2Off className="h-3.5 w-3.5 mr-1" />
                     Unlink
                   </Button>
-                  <span className="text-[11px] text-muted-foreground hidden lg:inline ml-1">
-                    (or Ctrl + Click)
-                  </span>
+
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 text-xs ml-auto"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground ml-auto"
                     onClick={() => setLinkBar(null)}
                   >
                     <X className="h-3.5 w-3.5" />
@@ -2687,6 +3225,30 @@ useEffect(() => {
     >
       U
     </button>
+
+    <div className="h-4 w-px bg-border mx-0.5" />
+
+    {/* Convert selected text to Link */}
+    <button
+      type="button"
+      title="Turn selected text into link (Ctrl+K)"
+      onMouseDown={(e) => {
+        e.preventDefault();
+        saveSel();
+        const sel = window.getSelection();
+        const selectedText = sel ? sel.toString().trim() : "";
+        setTextFormatOpen(false);
+        setLinkDialog({
+          url: "",
+          text: selectedText,
+          newTab: true,
+        });
+      }}
+      className="h-8 px-2 flex items-center gap-1.5 rounded-md text-xs font-medium hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950 dark:hover:text-violet-300 transition-colors"
+    >
+      <Link2 className="h-3.5 w-3.5 text-violet-500" />
+      <span>Link</span>
+    </button>
   </div>
 )}
 
@@ -2698,8 +3260,19 @@ useEffect(() => {
                 data-placeholder="Start writing your blog… Select text to format. Drop images anywhere in the article."
              onInput={onEdit}
 onClick={handleEditorClick}
+onMouseOver={handleEditorMouseOver}
 onMouseUp={handleTextSelection}
 onBlur={saveSel}
+onKeyDown={(e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    saveSel();
+    const sel = window.getSelection();
+    const selectedText = sel ? sel.toString().trim() : "";
+    setTextFormatOpen(false);
+    setLinkDialog({ url: "", text: selectedText, newTab: true });
+  }
+}}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={async (e) => {
                   e.preventDefault();
@@ -2823,9 +3396,31 @@ onBlur={saveSel}
                 onChange={(e) =>
                   setLinkDialog({ ...linkDialog, url: e.target.value })
                 }
-                placeholder="/blog/slug or https://…"
+                placeholder="/blogs/slug or https://…"
+                autoFocus
               />
             </Labeled>
+            <div className="pt-0.5 space-y-1">
+              <span className="text-[11px] text-muted-foreground font-medium">Quick suggestions:</span>
+              <div className="flex flex-wrap gap-1">
+                {[
+                  { label: "Services", url: "/services" },
+                  { label: "Features", url: "/features" },
+                  { label: "Pricing", url: "/pricing" },
+                  { label: "Free Invoice", url: "/free-invoice" },
+                  { label: "About Us", url: "/about-us" },
+                ].map((q) => (
+                  <button
+                    key={q.url}
+                    type="button"
+                    onClick={() => setLinkDialog((d) => ({ ...d, url: q.url }))}
+                    className="px-2 py-0.5 rounded text-[11px] border border-border bg-muted/30 hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950 dark:hover:text-violet-300 transition-colors"
+                  >
+                    {q.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkDialog(null)}>
@@ -2837,8 +3432,40 @@ onBlur={saveSel}
                   toast.error("Please add a URL");
                   return;
                 }
-                const text = linkDialog.text || linkDialog.url;
-                exec("createLink", linkDialog.url);
+                let targetUrl = linkDialog.url.trim();
+                // Auto-normalize /blog/ to /blogs/
+                if (/^\/blog\//i.test(targetUrl)) {
+                  targetUrl = targetUrl.replace(/^\/blog\//i, "/blogs/");
+                } else if (
+                  /^https?:\/\/vinimay\.sharda\.co\.in\/blog\//i.test(targetUrl)
+                ) {
+                  targetUrl = targetUrl.replace(
+                    /^https?:\/\/vinimay\.sharda\.co\.in\/blog\//i,
+                    "https://vinimay.sharda.co.in/blogs/",
+                  );
+                }
+
+                // If editing an existing anchor node directly
+                if (linkDialog.editAnchor) {
+                  linkDialog.editAnchor.setAttribute("href", targetUrl);
+                  if (linkDialog.text) {
+                    linkDialog.editAnchor.textContent = linkDialog.text;
+                  }
+                  if (linkDialog.newTab) {
+                    linkDialog.editAnchor.setAttribute("target", "_blank");
+                    linkDialog.editAnchor.setAttribute("rel", "noopener");
+                  } else {
+                    linkDialog.editAnchor.removeAttribute("target");
+                    linkDialog.editAnchor.removeAttribute("rel");
+                  }
+                  setLinkDialog(null);
+                  setLinkBar(null);
+                  onEdit();
+                  return;
+                }
+
+                const text = linkDialog.text || targetUrl;
+                exec("createLink", targetUrl);
                 setLinkDialog(null);
                 setTimeout(() => {
                   const sel = window.getSelection();
@@ -2846,17 +3473,19 @@ onBlur={saveSel}
                   if (node) {
                     const a =
                       node.parentElement && node.parentElement.closest("a");
-                    if (a && linkDialog.newTab) {
-                      a.setAttribute("target", "_blank");
-                      a.setAttribute("rel", "noopener");
+                    if (a) {
+                      if (linkDialog.newTab) {
+                        a.setAttribute("target", "_blank");
+                        a.setAttribute("rel", "noopener");
+                      }
+                      if (linkDialog.text) a.textContent = linkDialog.text;
                     }
-                    if (a && linkDialog.text) a.textContent = linkDialog.text;
                   }
                   onEdit();
                 }, 30);
               }}
             >
-              Insert link
+              {linkDialog?.editAnchor ? "Update link" : "Insert link"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3043,269 +3672,279 @@ onBlur={saveSel}
 
       {/* AI SEO Suggestions Dialog */}
       <Dialog open={seoSuggestOpen} onOpenChange={setSeoSuggestOpen}>
-        <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden flex flex-col" style={{maxHeight: "90vh"}}>
+        <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden flex flex-col" style={{ maxHeight: "88vh" }}>
 
-          {/* ── Header ── */}
-          <div className="px-6 pt-5 pb-4 border-b border-border shrink-0">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <Sparkles className="h-4 w-4 text-violet-500" />
-                  <h2 className="text-[15px] font-bold tracking-tight">AI SEO Suggestions &amp; Score Impact</h2>
+          {/* ── Compact Header ── */}
+          <div className="px-5 py-3.5 border-b border-border bg-gradient-to-r from-violet-50/60 via-background to-indigo-50/40 dark:from-violet-950/20 dark:via-background dark:to-indigo-950/20 shrink-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="h-7 w-7 rounded-lg bg-violet-600/10 dark:bg-violet-400/10 flex items-center justify-center text-violet-600 dark:text-violet-400 shrink-0">
+                  <Sparkles className="h-4 w-4" />
                 </div>
-                <p className="text-[11.5px] text-muted-foreground">
-                  Click any field to include or skip it. Watch your projected SEO score update live below!
-                </p>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[14px] font-bold tracking-tight text-foreground leading-none">
+                      AI SEO Suggestions
+                    </h2>
+                    <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-300 bg-violet-100 dark:bg-violet-950 px-2 py-0.5 rounded-full">
+                      Preview &amp; Select
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Choose suggestions to include or skip. SEO score updates live.
+                  </p>
+                </div>
+              </div>
+
+              {/* Compact Score pill */}
+              <div className="flex items-center gap-2 bg-white dark:bg-card border border-border/80 rounded-xl px-3 py-1.5 shadow-xs shrink-0">
+                <div className="text-center">
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold block leading-none">Score</span>
+                  <span className="text-[15px] font-black text-foreground">{analysis.score}</span>
+                </div>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <div className="text-center">
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold block leading-none">Projected</span>
+                  <span className="text-[15px] font-black text-violet-600 dark:text-violet-400">
+                    {boostBreakdown.projected}
+                  </span>
+                </div>
+                {boostBreakdown.boost > 0 ? (
+                  <span className="ml-1 inline-flex items-center gap-1 bg-emerald-600 text-white text-[10.5px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                    +{boostBreakdown.boost} pts 🚀
+                  </span>
+                ) : boostBreakdown.projected < analysis.score ? (
+                  <span className="ml-1 inline-flex items-center gap-1 bg-amber-600 text-white text-[10.5px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                    {boostBreakdown.projected - analysis.score} pts ⚠️
+                  </span>
+                ) : null}
               </div>
             </div>
 
-            {/* Score row */}
-            <div className="flex items-center gap-5 mt-3.5">
-              <div>
-                <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-semibold mb-0.5">Current Score</p>
-                <p className="text-[26px] font-black leading-none">
-                  {analysis.score}
-                  <span className="text-[13px] text-muted-foreground font-normal ml-0.5"> / 100</span>
-                </p>
-              </div>
-              <ChevronRight className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-semibold mb-0.5">Projected Score</p>
-                <p className="text-[26px] font-black leading-none">
-                  {projectedAnalysis?.score ?? analysis.score}
-                  <span className="text-[13px] text-muted-foreground font-normal ml-0.5"> / 100</span>
-                </p>
-              </div>
-              {projectedAnalysis && projectedAnalysis.score > analysis.score && (
-                <span className="ml-auto inline-flex items-center gap-1.5 bg-emerald-500 text-white text-[12px] font-bold px-3.5 py-1.5 rounded-full shadow-sm">
-                  +{projectedAnalysis.score - analysis.score} pts Boost 🚀
-                </span>
-              )}
-            </div>
-
-            {/* AI Strategy */}
-            {seoSuggestions?.strategy && (
-              <div className="mt-3 flex gap-2 rounded-lg border border-violet-100 dark:border-violet-900/40 bg-violet-50/50 dark:bg-violet-950/20 px-3 py-2.5">
-                <Info className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
-                <p className="text-[11px] text-violet-700 dark:text-violet-300 leading-relaxed">
-                  <span className="font-semibold">AI Strategy:</span> {seoSuggestions.strategy}
+            {/* AI Reasoning */}
+            {seoSuggestions?.reasoning && (
+              <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-violet-200/60 dark:border-violet-800/40 bg-violet-50/70 dark:bg-violet-950/30 px-3 py-2">
+                <Info className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400 mt-0.5 shrink-0" />
+                <p className="text-[11px] text-violet-800 dark:text-violet-200 leading-relaxed">
+                  <span className="font-semibold">Strategy:</span> {seoSuggestions.reasoning}
                 </p>
               </div>
             )}
           </div>
 
-          {/* ── Controls row ── */}
-          <div className="flex items-center justify-between px-6 py-2.5 border-b border-border bg-muted/20 shrink-0">
-            <p className="text-[12px] text-muted-foreground">
+          {/* ── Controls Row ── */}
+          <div className="flex items-center justify-between px-5 py-2 border-b border-border bg-muted/30 shrink-0 text-xs">
+            <p className="text-[11.5px] text-muted-foreground">
               <span className="font-semibold text-foreground">
                 {Object.values(selectedSuggestions).filter(Boolean).length}
               </span>{" "}
-              of {Object.keys(selectedSuggestions).length} suggestions selected
+              of {actionableCards.length} actionable suggestions included
             </p>
-            <div className="flex gap-4">
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                className="text-[11.5px] text-violet-600 hover:underline font-medium"
-                onClick={() =>
-                  setSelectedSuggestions({
-                    focusKeyword: true, seoTitle: true, slug: true,
-                    introParagraph: true, metaDescription: true,
-                    secondaryKeywords: true, internalLink: true,
-                  })
-                }
+                className="text-[11px] text-violet-600 hover:text-violet-700 dark:text-violet-400 font-semibold transition-colors"
+                onClick={() => {
+                  const allOn = {};
+                  actionableCards.forEach((c) => {
+                    allOn[c.key] = true;
+                  });
+                  setSelectedSuggestions((prev) => ({ ...prev, ...allOn }));
+                }}
               >
-                Select All
+                Include All
               </button>
+              <span className="text-muted-foreground/40">|</span>
               <button
                 type="button"
-                className="text-[11.5px] text-muted-foreground hover:text-foreground hover:underline font-medium"
-                onClick={() =>
-                  setSelectedSuggestions({
-                    focusKeyword: false, seoTitle: false, slug: false,
-                    introParagraph: false, metaDescription: false,
-                    secondaryKeywords: false, internalLink: false,
-                  })
-                }
+                className="text-[11px] text-muted-foreground hover:text-foreground font-semibold transition-colors"
+                onClick={() => {
+                  const allOff = {};
+                  actionableCards.forEach((c) => {
+                    allOff[c.key] = false;
+                  });
+                  setSelectedSuggestions((prev) => ({ ...prev, ...allOff }));
+                }}
               >
-                Deselect All
+                Skip All
               </button>
             </div>
           </div>
 
-          {/* ── Scrollable cards ── */}
+          {/* ── Actionable Cards ── */}
           <div className="overflow-y-auto flex-1 min-h-0">
-            <div className="px-6 py-4 space-y-3">
-              {seoSuggestions &&
-                (() => {
-                  const s = seoSuggestions;
-                  const cards = [
-                    {
-                      key: "focusKeyword",
-                      label: "Focus Keyword",
-                      badge: "Primary Target",
-                      charHint: null,
-                      current: form.seo.focusKeyword || "(Not set)",
-                      suggested: s.focusKeyword,
-                    },
-                    {
-                      key: "seoTitle",
-                      label: "SEO Title (SERP)",
-                      badge: null,
-                      charHint: s.seoTitle ? `${s.seoTitle.length} / 60 chars` : null,
-                      current: form.seo.metaTitle || form.title || "(Not set)",
-                      suggested: s.seoTitle,
-                    },
-                    {
-                      key: "slug",
-                      label: "URL Slug",
-                      badge: "SEO Friendly",
-                      charHint: null,
-                      current: form.slug || "(Not set)",
-                      suggested: s.slug,
-                    },
-                    {
-                      key: "introParagraph",
-                      label: "Intro Paragraph",
-                      badge: "+7 pts",
-                      charHint: null,
-                      current: null,
-                      suggested: s.introParagraph,
-                    },
-                    {
-                      key: "metaDescription",
-                      label: "Meta Description",
-                      badge: null,
-                      charHint: s.metaDescription ? `${s.metaDescription.length} / 160 chars` : null,
-                      current: form.seo.metaDescription || "(Not set)",
-                      suggested: s.metaDescription,
-                    },
-                    {
-                      key: "secondaryKeywords",
-                      label: "Related Keywords",
-                      badge: "LSI Terms",
-                      charHint: null,
-                      current: (form.seo.secondaryKeywords || []).join(", ") || "(Not set)",
-                      suggested: Array.isArray(s.secondaryKeywords)
-                        ? s.secondaryKeywords.join(", ")
-                        : s.secondaryKeywords,
-                    },
-                    {
-                      key: "internalLink",
-                      label: "Internal Link",
-                      badge: "Link Building",
-                      charHint: null,
-                      current: null,
-                      suggested: s.internalLink
-                        ? `→ "${s.internalLink.targetTitle}" (/blog/${s.internalLink.slug})`
-                        : null,
-                      extra: s.internalLink?.contextSentence,
-                    },
-                  ];
-                  return cards
-                    .filter((c) => c.suggested)
-                    .map((card) => (
-                      <div
-                        key={card.key}
-                        onClick={() =>
-                          setSelectedSuggestions((prev) => ({
-                            ...prev,
-                            [card.key]: !prev[card.key],
-                          }))
-                        }
-                        className={
-                          "rounded-xl border p-3.5 space-y-2.5 cursor-pointer transition-all " +
-                          (selectedSuggestions[card.key]
-                            ? "border-violet-200 dark:border-violet-800 bg-white dark:bg-card"
-                            : "border-border bg-muted/10 opacity-60")
-                        }
-                      >
-                        {/* Card header row */}
-                        <div className="flex items-center gap-2.5">
-                          {/* Checkbox */}
-                          <div
-                            className={
-                              "h-4 w-4 rounded shrink-0 flex items-center justify-center border-2 transition-all " +
-                              (selectedSuggestions[card.key]
-                                ? "bg-violet-600 border-violet-600"
-                                : "border-border bg-background")
-                            }
-                          >
-                            {selectedSuggestions[card.key] && (
-                              <svg className="h-2.5 w-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </div>
-                          <span className="text-[13px] font-semibold flex-1">{card.label}</span>
-                          {card.charHint && (
-                            <span className="text-[10.5px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
-                              {card.charHint}
-                            </span>
-                          )}
-                          {card.badge && !card.charHint && (
-                            <span className="text-[10.5px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
-                              {card.badge}
-                            </span>
-                          )}
+            <div className="px-5 py-3.5 space-y-2.5">
+              {actionableCards.length === 0 ? (
+                <div className="py-12 text-center space-y-2">
+                  <div className="h-10 w-10 mx-auto rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center">
+                    <CheckCheck className="h-5 w-5" />
+                  </div>
+                  <p className="text-sm font-semibold text-foreground">
+                    Everything is Already Well-Aligned!
+                  </p>
+                  <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                    Your focus keyword, title, slug, and content are already matching best SEO practices. No further changes needed.
+                  </p>
+                </div>
+              ) : (
+                actionableCards.map((card) => {
+                  const isIncluded = !!selectedSuggestions[card.key];
+                  return (
+                    <div
+                      key={card.key}
+                      onClick={() =>
+                        setSelectedSuggestions((prev) => ({
+                          ...prev,
+                          [card.key]: !prev[card.key],
+                        }))
+                      }
+                      className={
+                        "rounded-xl border p-3 space-y-2 cursor-pointer transition-all " +
+                        (isIncluded
+                          ? "border-violet-300 dark:border-violet-700 bg-white dark:bg-card shadow-xs ring-1 ring-violet-500/10"
+                          : "border-border/60 bg-muted/15 opacity-65")
+                      }
+                    >
+                      {/* Card Header Row */}
+                      <div className="flex items-center gap-2">
+                        {/* Status Checkbox */}
+                        <div
+                          className={
+                            "h-4 w-4 rounded shrink-0 flex items-center justify-center border transition-all " +
+                            (isIncluded
+                              ? "bg-violet-600 border-violet-600 text-white"
+                              : "border-muted-foreground/40 bg-background")
+                          }
+                        >
+                          {isIncluded && <Check className="h-2.5 w-2.5 stroke-[3]" />}
+                        </div>
+
+                        <span className="text-[12.5px] font-bold text-foreground">
+                          {card.label}
+                        </span>
+
+                        {card.badge && (
+                          <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                            {card.badge}
+                          </span>
+                        )}
+
+                        {card.charHint && (
+                          <span className="text-[10px] text-muted-foreground/80 font-mono">
+                            {card.charHint}
+                          </span>
+                        )}
+
+                        {/* Include / Skip Action Buttons */}
+                        <div className="ml-auto flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedSuggestions((prev) => ({ ...prev, [card.key]: true }));
+                              setSelectedSuggestions((prev) => ({
+                                ...prev,
+                                [card.key]: true,
+                              }));
                             }}
                             className={
-                              "h-6 px-2.5 text-[11px] rounded-md font-semibold border transition-all shrink-0 " +
-                              (selectedSuggestions[card.key]
-                                ? "bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400"
-                                : "border-border text-muted-foreground hover:text-foreground bg-background")
+                              "h-6 px-2 text-[10.5px] font-semibold rounded-md flex items-center gap-1 transition-all " +
+                              (isIncluded
+                                ? "bg-emerald-600 text-white shadow-xs"
+                                : "bg-muted text-muted-foreground hover:text-foreground")
                             }
                           >
-                            ✓ Apply
+                            <Check className="h-3 w-3" />
+                            Include
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedSuggestions((prev) => ({
+                                ...prev,
+                                [card.key]: false,
+                              }));
+                            }}
+                            className={
+                              "h-6 px-2 text-[10.5px] font-semibold rounded-md flex items-center gap-1 transition-all " +
+                              (!isIncluded
+                                ? "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-900"
+                                : "bg-muted text-muted-foreground hover:text-foreground")
+                            }
+                          >
+                            <X className="h-3 w-3" />
+                            Skip
                           </button>
                         </div>
-
-                        {/* Current value */}
-                        {card.current && (
-                          <p className="text-[11px] text-muted-foreground pl-6 leading-snug">
-                            <span className="font-medium">Current:</span>{" "}
-                            <span>{card.current}</span>
-                          </p>
-                        )}
-
-                        {/* Suggested value box */}
-                        {card.suggested && (
-                          <div className="ml-6 rounded-lg border border-border/60 bg-muted/30 dark:bg-muted/10 px-3 py-2">
-                            <p className="text-[12px] text-foreground leading-relaxed">
-                              {card.suggested}
-                            </p>
-                          </div>
-                        )}
-
-                        {/* Context sentence for internal link */}
-                        {card.extra && (
-                          <p className="text-[11px] text-muted-foreground italic pl-6 line-clamp-2">
-                            "{card.extra}"
-                          </p>
-                        )}
                       </div>
-                    ));
-                })()}
+
+                      {/* Current Value (if exists) */}
+                      {card.current && (
+                        <p className="text-[11px] text-muted-foreground pl-6 leading-snug">
+                          <span className="font-semibold text-muted-foreground/80">Current:</span>{" "}
+                          <span>{card.current}</span>
+                        </p>
+                      )}
+
+                      {/* Suggested Value Box */}
+                      {card.suggested && (
+                        <div className="ml-6 rounded-lg border border-violet-100 dark:border-violet-900/60 bg-violet-50/40 dark:bg-violet-950/20 px-3 py-1.5">
+                          <p className="text-[12px] text-foreground leading-relaxed font-medium">
+                            {card.suggested}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Harmful warning if any */}
+                      {card.warning && (
+                        <div className="ml-6 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/30 px-3 py-2 flex items-start gap-2">
+                          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                          <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                            {card.warning}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Extra context sentence */}
+                      {card.extra && (
+                        <p className="text-[11px] text-muted-foreground italic pl-6 line-clamp-2">
+                          "{card.extra}"
+                        </p>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
           {/* ── Footer ── */}
-          <div className="flex items-center justify-between px-6 py-3.5 border-t border-border bg-background shrink-0">
-            <Button variant="outline" className="h-9" onClick={() => setSeoSuggestOpen(false)}>
+          <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-background shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8.5 text-xs"
+              onClick={() => setSeoSuggestOpen(false)}
+            >
               Cancel
             </Button>
             <Button
-              className="h-9 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-semibold gap-1.5"
+              size="sm"
+              className="h-8.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-semibold text-xs gap-1.5 shadow-sm"
               onClick={applySelectedSuggestions}
-              disabled={Object.values(selectedSuggestions).every((v) => !v)}
+              disabled={
+                actionableCards.length === 0 ||
+                actionableCards.every((c) => !selectedSuggestions[c.key])
+              }
             >
-              <Clock className="h-3.5 w-3.5" />
-              Apply Selected ({Object.values(selectedSuggestions).filter(Boolean).length})
-              {projectedAnalysis && ` (Score: ${projectedAnalysis.score}/100)`}
+              <Sparkles className="h-3.5 w-3.5" />
+              Apply Selected (
+              {
+                actionableCards.filter((c) => selectedSuggestions[c.key])
+                  .length
+              }
+              )
+              {boostBreakdown && ` · Score: ${boostBreakdown.projected}/100`}
             </Button>
           </div>
 
@@ -3515,6 +4154,9 @@ function EditorRail({
   fetchSeoSuggestions,
   seoSuggestLoading,
   allBlogs = [],
+  publishedSlugs = [],
+  inArticleLinks = [],
+  onJumpToLink,
 }) {
   const kw = kwMetrics(form.seo.focusKeyword, keywords);
   const [linkSearchQuery, setLinkSearchQuery] = useState("");
@@ -3532,7 +4174,7 @@ function EditorRail({
   }, [linkSearchQuery, allBlogs, form.id]);
 
   function smartInsertLink(blog) {
-    const targetUrl = `/blog/${blog.slug}`;
+    const targetUrl = `/blogs/${blog.slug}`;
     const targetTitle = blog.title;
     if (typeof window !== "undefined") {
       const sel = window.getSelection();
@@ -3542,6 +4184,17 @@ function EditorRail({
       }
     }
     // No selection — append Related Reading callout
+    insertSuggestion({ url: targetUrl, title: targetTitle });
+  }
+
+  function smartInsertUrl(targetUrl, targetTitle) {
+    if (typeof window !== "undefined") {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.isCollapsed) {
+        document.execCommand("createLink", false, targetUrl);
+        return;
+      }
+    }
     insertSuggestion({ url: targetUrl, title: targetTitle });
   }
 
@@ -3996,10 +4649,10 @@ function EditorRail({
           </p>
           <div className="rounded-xl border border-border p-4 bg-white dark:bg-card">
             <p className="gpreview-url">
-              https://example.com
+              https://vinimay.sharda.co.in
               <span className="text-muted-foreground">
                 {" "}
-                › blog › {form.slug || "your-blog-slug"}
+                › blogs › {form.slug || "your-blog-slug"}
               </span>
             </p>
             <p className="gpreview-title mt-1 line-clamp-1">
@@ -4069,32 +4722,223 @@ function EditorRail({
 
       {/* LINKS TAB */}
       {tab === "links" && (
-        <CardContent className="p-4 space-y-3">
+        <CardContent className="p-4 space-y-4">
           <div>
-            <p className="text-[13px] font-semibold">Internal links</p>
+            <p className="text-[13px] font-semibold">Links &amp; Health Inspector</p>
             <p className="text-[11.5px] text-muted-foreground">
-              Search your blogs or pick from AI suggestions below.
+              Monitor live in-article link health, insert Vinimay pages, or link related blogs.
             </p>
           </div>
 
-          {/* Search Bar */}
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-            <Input
-              value={linkSearchQuery}
-              onChange={(e) => setLinkSearchQuery(e.target.value)}
-              placeholder="Search blogs by title, slug, or keyword…"
-              className="pl-8 pr-8 h-9 text-[12.5px] bg-background"
-            />
-            {linkSearchQuery && (
-              <button
-                type="button"
-                onClick={() => setLinkSearchQuery("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
+          {/* 1. In-Article Links (Live Health Inspector) */}
+          {(() => {
+            const brokenCount = (inArticleLinks || []).filter(
+              (l) => l.status === "broken_404",
+            ).length;
+            return (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                    In-Article Links ({inArticleLinks?.length || 0})
+                  </span>
+                  {brokenCount > 0 ? (
+                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                      {brokenCount} broken (404)
+                    </Badge>
+                  ) : inArticleLinks?.length > 0 ? (
+                    <span className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-medium">
+                      ✓ All links healthy
+                    </span>
+                  ) : null}
+                </div>
+
+                {brokenCount > 0 && (
+                  <div className="rounded-xl border border-rose-300 bg-rose-50/90 dark:border-rose-900/50 dark:bg-rose-950/40 p-3 space-y-1">
+                    <p className="text-[12px] font-semibold text-rose-800 dark:text-rose-200 flex items-center gap-1.5">
+                      <AlertTriangle className="h-4 w-4 text-rose-500 shrink-0" />
+                      Broken Link Warning!
+                    </p>
+                    <p className="text-[11px] text-rose-700 dark:text-rose-300 leading-relaxed">
+                      Target blog slug does not exist on Vinimay. This will cause 404 errors for visitors and hurt SEO rankings. Click "Jump" below to fix or update it.
+                    </p>
+                  </div>
+                )}
+
+                {inArticleLinks?.length === 0 ? (
+                  <p className="text-[11.5px] text-muted-foreground rounded-lg border border-dashed border-border p-3 text-center">
+                    No links in article yet. Add at least 1 internal and 1 external link for maximum SEO.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {inArticleLinks.map((l) => (
+                      <div
+                        key={l.id}
+                        className={`rounded-lg border p-2 text-xs space-y-1 transition-colors ${
+                          l.status === "broken_404"
+                            ? "border-rose-300 bg-rose-50/40 dark:border-rose-900/40 dark:bg-rose-950/20"
+                            : "border-border bg-card hover:border-violet-200"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span
+                            className="font-medium truncate max-w-[170px]"
+                            title={l.text}
+                          >
+                            "{l.text}"
+                          </span>
+                          {l.status === "live" && (
+                            <Badge
+                              variant="outline"
+                              className="text-[9.5px] px-1 py-0 border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300 shrink-0"
+                            >
+                              ✓ Live
+                            </Badge>
+                          )}
+                          {l.status === "vinimay_page" && (
+                            <Badge
+                              variant="outline"
+                              className="text-[9.5px] px-1 py-0 border-blue-300 text-blue-700 dark:border-blue-800 dark:text-blue-300 shrink-0"
+                            >
+                              ✓ Vinimay Page
+                            </Badge>
+                          )}
+                          {l.status === "draft" && (
+                            <Badge
+                              variant="outline"
+                              className="text-[9.5px] px-1 py-0 border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300 shrink-0"
+                            >
+                              ⚠ Draft
+                            </Badge>
+                          )}
+                          {l.status === "broken_404" && (
+                            <Badge
+                              variant="destructive"
+                              className="text-[9.5px] px-1 py-0 shrink-0"
+                            >
+                              ✕ 404
+                            </Badge>
+                          )}
+                          {l.status === "external" && (
+                            <Badge
+                              variant="outline"
+                              className="text-[9.5px] px-1 py-0 border-purple-300 text-purple-700 dark:border-purple-800 dark:text-purple-300 shrink-0"
+                            >
+                              External
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-[10.5px] text-muted-foreground font-mono truncate">
+                          {l.href}
+                        </p>
+                        <div className="flex items-center justify-end gap-1.5 pt-0.5">
+                          {onJumpToLink && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-[10.5px] text-muted-foreground hover:text-foreground"
+                              onClick={() => onJumpToLink(l.href)}
+                            >
+                              Jump
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-2 text-[10.5px] text-sky-600 hover:text-sky-700 dark:text-sky-400"
+                            onClick={() => window.open(l.targetUrl, "_blank")}
+                          >
+                            <ExternalLink className="h-3 w-3 mr-1" />
+                            View ↗
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <Separator />
+
+          {/* 2. Quick Vinimay Pages (1-Click Insert) */}
+          <div className="space-y-1.5">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              Quick Vinimay Pages
+            </span>
+            <div className="grid grid-cols-2 gap-1.5">
+              {[
+                {
+                  title: "Accounting Software Services",
+                  label: "Services",
+                  url: "/services",
+                },
+                {
+                  title: "Accounting Software Features",
+                  label: "Features",
+                  url: "/features",
+                },
+                {
+                  title: "Accounting Software Pricing",
+                  label: "Pricing",
+                  url: "/pricing",
+                },
+                {
+                  title: "Free Invoice Software for Small Business",
+                  label: "Free Invoice",
+                  url: "/free-invoice",
+                },
+                {
+                  title: "Vinimay Accounting Software",
+                  label: "About Us",
+                  url: "/about-us",
+                },
+                {
+                  title: "Free Accounting and Billing Software",
+                  label: "Home / Platform",
+                  url: "/",
+                },
+              ].map((p) => (
+                <Button
+                  key={p.url}
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[11px] justify-start truncate"
+                  title={`Insert link to ${p.url} (Anchor: "${p.title}")`}
+                  onClick={() => smartInsertUrl(p.url, p.title)}
+                >
+                  <Link2 className="h-3 w-3 mr-1 shrink-0 text-violet-500" />
+                  <span className="truncate">{p.label}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* 3. Search Published Blogs */}
+          <div className="space-y-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              Search Published Blogs
+            </span>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                value={linkSearchQuery}
+                onChange={(e) => setLinkSearchQuery(e.target.value)}
+                placeholder="Search blogs by title, slug, or keyword…"
+                className="pl-8 pr-8 h-9 text-[12.5px] bg-background"
+              />
+              {linkSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setLinkSearchQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Search Results */}
@@ -4113,8 +4957,8 @@ function EditorRail({
                     <p className="text-[12.5px] font-medium leading-snug line-clamp-2">
                       {b.title}
                     </p>
-                    <p className="text-[10.5px] text-muted-foreground truncate">
-                      /blog/{b.slug}
+                    <p className="text-[10.5px] text-muted-foreground truncate font-mono">
+                      /blogs/{b.slug}
                       {b.seo?.focusKeyword && ` · ${b.seo.focusKeyword}`}
                     </p>
                     <Button
@@ -4878,7 +5722,7 @@ function PreviewModal({ open, onOpenChange, form, analysis }) {
                       Google Search preview
                     </p>
                     <p className="gpreview-url">
-                      https://example.com › blog ›{" "}
+                      https://vinimay.sharda.co.in › blogs ›{" "}
                       {form.slug || "your-blog-slug"}
                     </p>
                     <p className="gpreview-title mt-1.5">

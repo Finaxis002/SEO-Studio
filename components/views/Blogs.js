@@ -592,7 +592,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
                                 )}
                             </div>
                             <p className="text-[11.5px] text-muted-foreground truncate max-w-[280px]">
-                              /blog/{b.slug}
+                              /blogs/{b.slug}
                             </p>
                           </div>
                         </div>
