@@ -250,7 +250,11 @@ export default function BlogDetail({ blogId, navigate, can }) {
           </div>
           <div className="flex lg:flex-col items-center gap-3">
             <div className="flex items-center gap-2">
-              <ScoreRing value={b.seo?.score || 0} size={58} thickness={6} />
+              <ScoreRing
+                value={analysis.score ?? b.seo?.score ?? 0}
+                size={58}
+                thickness={6}
+              />
               <div className="text-[12px] leading-tight">
                 <p className="font-bold">SEO Score</p>
                 <p className="text-muted-foreground">
@@ -690,7 +694,7 @@ export default function BlogDetail({ blogId, navigate, can }) {
                   ["SEO title", b.seo?.metaTitle || b.title],
                   ["Meta description", b.seo?.metaDescription || "—"],
                   ["Focus keyword", b.seo?.focusKeyword || "—"],
-                  ["Slug", "/blog/" + b.slug],
+                  ["Slug", "/blogs/" + b.slug],
                   ["Canonical", b.seo?.canonical || "—"],
                   [
                     "Robots",
