@@ -586,7 +586,7 @@ async function handleRoute(request, { params }) {
       }
       if (category && category !== "all" && category !== "All") {
         filter.category = {
-          $regex: new RegExp("^" + esc(category) + "$", "i"),
+          $regex: new RegExp(esc(category), "i"),
         };
       }
       if (tag) {
