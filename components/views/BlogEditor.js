@@ -63,11 +63,14 @@ import {
   Hash,
   Search,
   Send,
-  RotateCcw,
+  RotateCcw,     
+  FileUp,
 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import mammoth from "mammoth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -266,6 +269,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   });
 
   const editorRef = useRef(null);
+const documentInputRef = useRef(null);
   const savedRange = useRef(null);
   const fileRef = useRef(null);
   const fileMode = useRef("content");
@@ -1025,6 +1029,86 @@ function handleTextSelection() {
       setUploading(false);
     }
   }
+
+{/*handle import document */}
+
+const handleDocumentImport = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    if (
+      file.type !==
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" &&
+      !file.name.toLowerCase().endsWith(".docx")
+    ) {
+      alert("Please select a .docx document.");
+      return;
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+
+   const result = await mammoth.convertToHtml(
+  { arrayBuffer },
+  {
+    convertImage: mammoth.images.imgElement(async (image) => {
+      const base64 = await image.read("base64");
+
+      // Convert base64 image into an actual File
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      const extension =
+        image.contentType.split("/")[1]?.replace("jpeg", "jpg") || "png";
+
+      const imageFile = new File(
+        [bytes],
+        `imported-image-${Date.now()}.${extension}`,
+        {
+          type: image.contentType,
+        },
+      );
+
+      // Upload using your existing upload system
+      const uploaded = await uploadFiles([imageFile], "content");
+
+      if (!uploaded?.length || !uploaded[0]?.url) {
+        throw new Error("Failed to upload imported image.");
+      }
+
+      const imageUrl = uploaded[0].url;
+
+      // Use your existing image HTML structure
+      return {
+        src: imageUrl,
+      };
+    }),
+  },
+);
+
+    const importedHtml = result.value;
+
+    if (!importedHtml.trim()) {
+      alert("The document does not contain any readable content.");
+      return;
+    }
+
+    if (!editorRef.current) return;
+
+    editorRef.current.innerHTML = importedHtml;
+
+    onEdit();
+  } catch (error) {
+    console.error("Document import failed:", error);
+    alert("Failed to import the document.");
+  } finally {
+    e.target.value = "";
+  }
+};
+
 
   async function handleFeaturedFiles(files) {
     const created = await uploadFiles(files, "featured");
@@ -2227,6 +2311,22 @@ useEffect(() => {
                 >
                   <ImageIcon className="h-4 w-4" />
                 </ToolBtn>
+           {/*insert document*/}
+           <ToolBtn
+            title="Import document"
+           onClick={() => documentInputRef.current?.click()}
+           >
+            <FileUp className="h-4 w-4" />
+           </ToolBtn>
+
+          <input
+           ref={documentInputRef}
+             type="file"
+             accept=".docx"
+             className="hidden"
+             onChange={handleDocumentImport}
+              />
+
                 <ToolBtn
                   title="Insert table"
                   onClick={() =>
