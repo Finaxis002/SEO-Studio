@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
@@ -67,6 +67,7 @@ import {
   Send,
   RotateCcw,     
   FileUp,
+ 
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -322,6 +323,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
 
   const editorRef = useRef(null);
 const documentInputRef = useRef(null);
+const textInputRef = useRef(null);
   const savedRange = useRef(null);
   const fileRef = useRef(null);
   const fileMode = useRef("content");
@@ -1530,6 +1532,43 @@ function handleTextSelection() {
       setUploading(false);
     }
   }
+
+{/**handle text document*/}
+const handleTextImport = async (e) => {
+  const file = e.target.files?.[0];
+
+  if (!file) return;
+
+  try {
+    if (!file.name.toLowerCase().endsWith(".txt")) {
+      alert("Please select a .txt file.");
+      return;
+    }
+
+    const text = await file.text();
+
+    if (!text.trim()) {
+      alert("The text file is empty.");
+      return;
+    }
+
+    if (!editorRef.current) return;
+
+    const html = text
+      .split(/\r?\n/)
+      .map((line) => (line.trim() ? `<p>${line}</p>` : "<p><br></p>"))
+      .join("");
+
+    editorRef.current.innerHTML = html;
+
+    onEdit();
+  } catch (error) {
+    console.error("Text import failed:", error);
+    alert("Failed to import the text file.");
+  } finally {
+    e.target.value = "";
+  }
+};
 
 {/*handle import document */}
 
@@ -2817,6 +2856,22 @@ useEffect(() => {
                 >
                   <ImageIcon className="h-4 w-4" />
                 </ToolBtn>
+
+              {/*insert text document */}
+                     <ToolBtn
+                     title="Import text"
+                     onClick={() => textInputRef.current?.click()}
+                      >
+                       <FileText className="h-4 w-4" />
+                       </ToolBtn>
+
+                        <input
+                        ref={textInputRef}
+                        type="file"
+                        accept=".txt"
+                        className="hidden"
+                        onChange={handleTextImport}
+                         />
            {/*insert document*/}
            <ToolBtn
             title="Import document"
@@ -2824,7 +2879,6 @@ useEffect(() => {
            >
             <FileUp className="h-4 w-4" />
            </ToolBtn>
-
           <input
            ref={documentInputRef}
              type="file"
