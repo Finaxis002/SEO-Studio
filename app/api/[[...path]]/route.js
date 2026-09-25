@@ -238,10 +238,17 @@ function newBlogDoc(body, user) {
     slug: body.slug || slugify(title),
     category: body.category || "",
     subcategory: body.subcategory || "",
-    tags: body.tags || [],
+    tags:
+      body.tags && body.tags.length > 0
+        ? body.tags
+        : body.seo?.secondaryKeywords?.length
+          ? body.seo.secondaryKeywords
+          : body.seo?.focusKeyword
+            ? [body.seo.focusKeyword]
+            : [],
     author: body.author || user.name,
     authorId: user.id,
-    excerpt: body.excerpt || "",
+    excerpt: body.excerpt || body.seo?.metaDescription || "",
     featuredImage: body.featuredImage || {
       url: "",
       alt: "",
@@ -612,10 +619,17 @@ async function handleRoute(request, { params }) {
           id: cleaned.id,
           title: cleaned.title,
           slug: cleaned.slug,
-          excerpt: cleaned.excerpt || "",
+          excerpt: cleaned.excerpt || cleaned.seo?.metaDescription || "",
           category: cleaned.category || "General",
           subcategory: cleaned.subcategory || "",
-          tags: cleaned.tags || [],
+          tags:
+            cleaned.tags && cleaned.tags.length > 0
+              ? cleaned.tags
+              : cleaned.seo?.secondaryKeywords?.length
+                ? cleaned.seo.secondaryKeywords
+                : cleaned.seo?.focusKeyword
+                  ? [cleaned.seo.focusKeyword]
+                  : [],
           author: cleaned.author || "Vinimay Editorial Team",
           featuredImage: cleaned.featuredImage || { url: "", alt: "" },
           publishedAt: cleaned.publishedAt || cleaned.createdAt,
@@ -702,7 +716,7 @@ async function handleRoute(request, { params }) {
           id: cleaned.id,
           title: cleaned.title,
           slug: cleaned.slug,
-          excerpt: cleaned.excerpt || "",
+          excerpt: cleaned.excerpt || cleaned.seo?.metaDescription || "",
           category: cleaned.category || "General",
           featuredImage: cleaned.featuredImage || { url: "", alt: "" },
           publishedAt: cleaned.publishedAt || cleaned.createdAt,
@@ -721,6 +735,15 @@ async function handleRoute(request, { params }) {
         NextResponse.json({
           blog: {
             ...cleanedBlog,
+            excerpt: cleanedBlog.excerpt || cleanedBlog.seo?.metaDescription || "",
+            tags:
+              cleanedBlog.tags && cleanedBlog.tags.length > 0
+                ? cleanedBlog.tags
+                : cleanedBlog.seo?.secondaryKeywords?.length
+                  ? cleanedBlog.seo.secondaryKeywords
+                  : cleanedBlog.seo?.focusKeyword
+                    ? [cleanedBlog.seo.focusKeyword]
+                    : [],
             publishedAt: cleanedBlog.publishedAt || cleanedBlog.createdAt,
             updatedAt: cleanedBlog.updatedAt || cleanedBlog.createdAt,
             wordCount: words,
