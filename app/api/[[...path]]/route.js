@@ -329,8 +329,8 @@ async function checkAndPublishScheduled(db) {
         .toArray();
 
       for (const blog of scheduledBlogs) {
-        await db.collection("blogs").updateOne(
-          { id: blog.id },
+        const updateResult = await db.collection("blogs").updateOne(
+          { id: blog.id, status: "scheduled" },
           {
             $set: {
               status: "published",
@@ -339,6 +339,9 @@ async function checkAndPublishScheduled(db) {
             },
           },
         );
+
+        if (updateResult.modifiedCount === 0) continue;
+
         await notify(
           db,
           "publish",
@@ -366,6 +369,56 @@ async function checkAndPublishScheduled(db) {
   }
 }
 
+let lastCleanupTime = 0;
+async function cleanupOldLogsAndNotifications(db) {
+  const nowMs = Date.now();
+  // Throttle: run at most once every 60 minutes
+  if (nowMs - lastCleanupTime < 60 * 60 * 1000) return;
+  lastCleanupTime = nowMs;
+
+  try {
+    const fifteenDaysAgo = new Date(
+      nowMs - 15 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const sevenDaysAgo = new Date(
+      nowMs - 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    // 1. Delete activity logs older than 15 days
+    await db.collection("activity").deleteMany({
+      createdAt: { $lt: fifteenDaysAgo },
+    });
+
+    // 2. Keep maximum 500 latest activity logs if count still exceeds 500
+    const totalActivity = await db.collection("activity").countDocuments();
+    if (totalActivity > 500) {
+      const excess = totalActivity - 500;
+      const oldestDocs = await db
+        .collection("activity")
+        .find({})
+        .sort({ createdAt: 1 })
+        .limit(excess)
+        .project({ _id: 1 })
+        .toArray();
+      if (oldestDocs.length > 0) {
+        await db.collection("activity").deleteMany({
+          _id: { $in: oldestDocs.map((d) => d._id) },
+        });
+      }
+    }
+
+    // 3. Delete read notifications older than 7 days, or any notification older than 15 days
+    await db.collection("notifications").deleteMany({
+      $or: [
+        { createdAt: { $lt: fifteenDaysAgo } },
+        { read: true, createdAt: { $lt: sevenDaysAgo } },
+      ],
+    });
+  } catch (err) {
+    console.error("Auto-cleanup error:", err);
+  }
+}
+
 async function handleRoute(request, { params }) {
   const { path = [] } = await params;
   const route = "/" + path.join("/");
@@ -375,6 +428,7 @@ async function handleRoute(request, { params }) {
     db = await getDb();
     await ensureSeeded(db);
     await checkAndPublishScheduled(db);
+    cleanupOldLogsAndNotifications(db).catch(() => {});
   } catch (e) {
     console.error("DB connection error:", e);
     return handleCORS(
@@ -579,7 +633,9 @@ async function handleRoute(request, { params }) {
       );
       const skipParam = sp.get("skip") || sp.get("offset");
       const skip =
-        skipParam !== null && skipParam !== undefined && !isNaN(parseInt(skipParam, 10))
+        skipParam !== null &&
+        skipParam !== undefined &&
+        !isNaN(parseInt(skipParam, 10))
           ? Math.max(parseInt(skipParam, 10), 0)
           : (page - 1) * limit;
 
@@ -735,7 +791,8 @@ async function handleRoute(request, { params }) {
         NextResponse.json({
           blog: {
             ...cleanedBlog,
-            excerpt: cleanedBlog.excerpt || cleanedBlog.seo?.metaDescription || "",
+            excerpt:
+              cleanedBlog.excerpt || cleanedBlog.seo?.metaDescription || "",
             tags:
               cleanedBlog.tags && cleanedBlog.tags.length > 0
                 ? cleanedBlog.tags
