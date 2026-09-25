@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
@@ -25,6 +25,7 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  AlignJustify,
   Undo2,
   Redo2,
   Save,
@@ -2063,6 +2064,7 @@ useEffect(() => {
         insertOrderedList: document.queryCommandState(
           "insertOrderedList",
         ),
+        justifyFull: document.queryCommandState("justifyFull"),
       });
 
       setFontSize(getCurrentFontSize());
@@ -2930,6 +2932,13 @@ useEffect(() => {
                 >
                   <AlignRight className="h-4 w-4" />
                 </ToolBtn>
+                <ToolBtn
+                  title="Justify (Equal left & right edges) (Ctrl+J)"
+                  active={activeStates.justifyFull}
+                  onClick={() => exec("justifyFull")}
+                >
+                  <AlignJustify className="h-4 w-4" />
+                </ToolBtn>
                 <Separator orientation="vertical" className="h-5 mx-0.5" />
                 <ToolBtn
                   title="Clear formatting"
@@ -3325,6 +3334,9 @@ onKeyDown={(e) => {
     const selectedText = sel ? sel.toString().trim() : "";
     setTextFormatOpen(false);
     setLinkDialog({ url: "", text: selectedText, newTab: true });
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
+    e.preventDefault();
+    exec("justifyFull");
   }
 }}
                 onDragOver={(e) => e.preventDefault()}
