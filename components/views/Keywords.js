@@ -35,8 +35,9 @@ export default function Keywords({ navigate, can }) {
   const syncGsc = async () => {
     setSyncingGsc(true)
     try {
-      const res = await api.post('/api/keywords/sync-gsc')
-      toast.success(`Search Console synced: ${res.inserted} new, ${res.updated} updated (${res.total} total)`)
+      const res = await api('/keywords/sync-gsc', { method: 'POST' })
+      const countText = `${res.inserted || 0} new, ${res.updated || 0} updated`
+      toast.success(`Search Console synced: ${countText}`)
       mutate()
     } catch (err) {
       toast.error(err.message || 'Failed to sync with Search Console')
@@ -49,6 +50,34 @@ export default function Keywords({ navigate, can }) {
     if (!keywords?.length) return
     downloadCsv('keywords.csv', [['Keyword', 'Volume', 'Difficulty', 'Position', 'Previous', 'Target URL'], ...keywords.map((k) => [k.keyword, k.volume, k.difficulty, k.position, k.previousPosition, k.targetUrl])])
     toast.success('Exported ' + keywords.length + ' keywords')
+  }
+
+  const [fileName, setFileName] = useState('')
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setFileName(file.name)
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const text = event.target?.result || ''
+      setCsv(text)
+      const count = text.split(/\r?\n/).filter((l) => l.trim() && !/^keyword/i.test(l)).length
+      toast.success(`Loaded ${count} keywords from ${file.name}`)
+    }
+    reader.onerror = () => {
+      toast.error('Failed to read file')
+    }
+    reader.readAsText(file)
+  }
+
+  const downloadSampleCsv = () => {
+    downloadCsv('sample-keywords.csv', [
+      ['keyword', 'volume', 'difficulty', 'position', 'target url'],
+      ['gst billing software', '12000', '45', '8', '/blogs/gst-billing-software-2026'],
+      ['accounting software for shop owners', '4500', '32', '14', '/services/general'],
+      ['free billing software', '9800', '50', '5', '/blogs/free-accounting-software']
+    ])
   }
 
   return (
@@ -103,9 +132,19 @@ export default function Keywords({ navigate, can }) {
                           </td>
                           <td className="px-3 py-3 text-right">
                             <span className="font-bold tabular-nums">#{k.position}</span>
-                            <span className={'ml-1.5 text-[11px] font-semibold ' + (k.position <= k.previousPosition ? 'text-emerald-600' : 'text-rose-600')}>
-                              {k.position <= k.previousPosition ? '▲' : '▼'}{Math.abs(k.previousPosition - k.position)}
-                            </span>
+                            {k.previousPosition != null && (
+                              <span
+                                className={
+                                  'ml-1.5 text-[11px] font-semibold ' +
+                                  (k.position <= k.previousPosition
+                                    ? 'text-emerald-600'
+                                    : 'text-rose-600')
+                                }
+                              >
+                                {k.position < k.previousPosition ? '▲' : k.position > k.previousPosition ? '▼' : '▲'}
+                                {Math.abs(Number(k.previousPosition) - Number(k.position)).toFixed(1)}
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-3 w-24"><Sparkline data={k.trend} color={k.position <= k.previousPosition ? '#10b981' : '#f43f5e'} height={28} /></td>
                           <td className="px-3 py-3 text-[12.5px] text-muted-foreground truncate max-w-[180px]">{k.targetUrl || '—'}</td>
@@ -142,13 +181,92 @@ export default function Keywords({ navigate, can }) {
       </Dialog>
 
       {/* Import CSV */}
-      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+      <Dialog
+        open={importOpen}
+        onOpenChange={(o) => {
+          setImportOpen(o)
+          if (!o) {
+            setFileName('')
+            setCsv('')
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Import keywords from CSV</DialogTitle><DialogDescription>Paste CSV rows: keyword, volume, difficulty, position, target URL</DialogDescription></DialogHeader>
-          <Textarea rows={6} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder={'keyword,volume,difficulty,position,target url\ntechnical seo,5400,62,4,/blog/audit'} />
+          <DialogHeader>
+            <DialogTitle>Import keywords from CSV</DialogTitle>
+            <DialogDescription>
+              Upload a .csv file from your computer or paste CSV rows below.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-1">
+            {/* File Upload Box */}
+            <input
+              type="file"
+              id="csv-file-picker"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+            <label
+              htmlFor="csv-file-picker"
+              className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-border hover:border-violet-400 bg-muted/30 hover:bg-violet-50/40 dark:hover:bg-violet-950/20 rounded-xl cursor-pointer transition-all text-center group"
+            >
+              <Upload className="h-7 w-7 text-muted-foreground group-hover:text-violet-600 transition-colors mb-2" />
+              <p className="text-xs font-semibold text-foreground">
+                {fileName ? fileName : 'Click to select .CSV file from computer'}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {fileName
+                  ? 'File selected! Click Import below or choose another.'
+                  : 'Supports .CSV with: keyword, volume, difficulty, position, URL'}
+              </p>
+            </label>
+
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
+              <span>Or paste CSV rows manually:</span>
+              <button
+                type="button"
+                onClick={downloadSampleCsv}
+                className="text-violet-600 dark:text-violet-400 hover:underline font-medium inline-flex items-center gap-1"
+              >
+                <Download className="h-3 w-3" /> Sample CSV template
+              </button>
+            </div>
+
+            <Textarea
+              rows={4}
+              value={csv}
+              onChange={(e) => setCsv(e.target.value)}
+              placeholder={'keyword,volume,difficulty,position,target url\ngst billing software,12000,45,8,/blogs/gst-software'}
+              className="font-mono text-xs"
+            />
+          </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setImportOpen(false)}>Cancel</Button>
-            <Button onClick={() => api('/keywords/import', { method: 'POST', body: { csv } }).then((r) => { toast.success(r.imported + ' keywords imported'); setImportOpen(false); setCsv(''); mutate() }).catch((e) => toast.error(e.message))}>Import</Button>
+            <Button variant="outline" onClick={() => setImportOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!csv.trim()}
+              onClick={() => {
+                if (!csv.trim()) {
+                  toast.error('Please select a file or paste CSV text')
+                  return
+                }
+                api('/keywords/import', { method: 'POST', body: { csv } })
+                  .then((r) => {
+                    toast.success(r.imported + ' keywords imported successfully')
+                    setImportOpen(false)
+                    setCsv('')
+                    setFileName('')
+                    mutate()
+                  })
+                  .catch((e) => toast.error(e.message))
+              }}
+            >
+              Import {csv.trim() ? `(${csv.split(/\r?\n/).filter((l) => l.trim() && !/^keyword/i.test(l)).length})` : ''}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
