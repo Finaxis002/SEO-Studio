@@ -21,6 +21,7 @@ export default function ActivityView() {
   const [userF, setUserF] = useState('all')
   const [actionF, setActionF] = useState('all')
   const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(15)
 
   const url = useMemo(() => {
     const p = new URLSearchParams()
@@ -28,8 +29,9 @@ export default function ActivityView() {
     if (userF !== 'all') p.set('user', userF)
     if (actionF !== 'all') p.set('action', actionF)
     p.set('page', String(page))
+    p.set('limit', String(limit))
     return '/api/activity?' + p.toString()
-  }, [q, userF, actionF, page])
+  }, [q, userF, actionF, page, limit])
 
   const { data, error } = useSWR(url, fetcher)
   const { data: team } = useSWR('/api/team', fetcher)
@@ -95,7 +97,19 @@ export default function ActivityView() {
                       </tbody>
                     </table>
                   </div>
-                  <Pagination page={data.page} pages={data.pages} onPage={setPage} />
+                  <Pagination
+                    page={data.page}
+                    pages={data.pages}
+                    onPage={setPage}
+                    total={data?.total}
+                    limit={limit}
+                    onLimitChange={(l) => {
+                      setLimit(l)
+                      setPage(1)
+                    }}
+                    pageSizeOptions={[15, 30, 50, 100]}
+                    itemName="activities"
+                  />
                 </>
               )}
       </Card>

@@ -82,6 +82,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
   const [band, setBand] = useState("all");
   const [sort, setSort] = useState("newest");
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [requestChangesBlog, setRequestChangesBlog] = useState(null);
   const [scheduleBlog, setScheduleBlog] = useState(null);
@@ -100,9 +101,9 @@ export default function Blogs({ statusFilter, navigate, can }) {
     if (band !== "all") p.set("seoBand", band);
     p.set("sort", sort);
     p.set("page", String(page));
-    p.set("limit", "9");
+    p.set("limit", String(limit));
     return "/api/blogs?" + p.toString();
-  }, [q, status, author, category, band, sort, page]);
+  }, [q, status, author, category, band, sort, page, limit]);
 
   const { data, error, mutate } = useSWR(query, fetcher, {
     keepPreviousData: true,
@@ -786,7 +787,19 @@ export default function Blogs({ statusFilter, navigate, can }) {
                 </tbody>
               </table>
             </div>
-            <Pagination page={data.page} pages={data.pages} onPage={setPage} />
+            <Pagination
+              page={data.page}
+              pages={data.pages}
+              onPage={setPage}
+              total={data?.total}
+              limit={limit}
+              onLimitChange={(l) => {
+                setLimit(l);
+                setPage(1);
+              }}
+              pageSizeOptions={[10, 25, 50, 100]}
+              itemName="blogs"
+            />
           </>
         )}
       </Card>
