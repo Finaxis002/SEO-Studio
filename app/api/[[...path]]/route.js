@@ -2827,7 +2827,7 @@ async function handleRoute(request, { params }) {
       if (sp.get("q"))
         filter.resource = { $regex: esc(sp.get("q")), $options: "i" };
       const page = Math.max(parseInt(sp.get("page") || "1", 10), 1);
-      const limit = 15;
+      const limit = Math.min(Math.max(parseInt(sp.get("limit") || "15", 10), 1), 100);
       const total = await db.collection("activity").countDocuments(filter);
       const items = await db
         .collection("activity")

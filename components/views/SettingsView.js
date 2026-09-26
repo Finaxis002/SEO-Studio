@@ -14,6 +14,10 @@ import {
   ExternalLink,
   ShieldCheck,
   RefreshCw,
+  Folder,
+  Tag,
+  Search,
+  Layers,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -81,7 +85,20 @@ export default function SettingsView({
   const [newBotName, setNewBotName] = useState("");
   const [newBotAgent, setNewBotAgent] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [taxonomyTab, setTaxonomyTab] = useState("categories");
+  const [taxonomySearch, setTaxonomySearch] = useState("");
   const { theme, setTheme } = useTheme();
+
+  const categoriesList = (contentOptions?.categories || []).filter((c) =>
+    (c || "")
+      .toLowerCase()
+      .includes((taxonomySearch || "").toLowerCase().trim()),
+  );
+  const subcategoriesList = (contentOptions?.subcategories || []).filter((sc) =>
+    (sc || "")
+      .toLowerCase()
+      .includes((taxonomySearch || "").toLowerCase().trim()),
+  );
 
   useEffect(() => {
     setTab(canManageSettings ? initialTab || "general" : "profile");
@@ -821,92 +838,198 @@ export default function SettingsView({
               </CardContent>
             </Card>
           </div>
-          <Card className="card-hover">
-            <CardContent className="p-5 space-y-3">
-              <div>
-                <p className="text-[13px] font-medium">Content categories</p>
-              </div>
-              <Button
-                variant="outline"
-                onClick={() => setAddCategoryOpen(true)}
-              >
-                Add category
-              </Button>
-              <div className="flex flex-wrap gap-1.5">
-                {(contentOptions?.categories || []).map((category) => (
-                  <div
-                    key={category}
-                    className="flex items-center gap-1 rounded-md border px-2 py-1"
-                  >
-                    <Badge variant="outline" className="border-0 px-0">
-                      {category}
-                    </Badge>
-                    <button
-                      type="button"
-                      title="Edit category"
-                      onClick={() =>
-                        setEditingCategory({
-                          oldName: category,
-                          name: category,
-                        })
-                      }
-                    >
-                      <Pencil className="h-3 w-3 text-muted-foreground" />
-                    </button>
-                    <button
-                      type="button"
-                      title="Delete category"
-                      onClick={() =>
-                        setDeleteTarget({ type: "category", name: category })
-                      }
-                    >
-                      <Trash2 className="h-3 w-3 text-red-600" />
-                    </button>
+          {/* Taxonomy & Categories Card */}
+          <Card className="card-hover overflow-hidden border border-border/80 shadow-sm">
+            <div className="p-4 sm:p-5 border-b border-border/70 bg-muted/20">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-8 w-8 rounded-lg bg-violet-100 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
+                    <Layers className="h-4 w-4" />
                   </div>
-                ))}
-              </div>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => setAddSubcategoryOpen(true)}
-              >
-                Add subcategory
-              </Button>
-              <div className="flex flex-wrap gap-1.5">
-                {(contentOptions?.subcategories || []).map((subcategory) => (
-                  <div
-                    key={subcategory}
-                    className="flex items-center gap-1 rounded-md border px-2 py-1"
-                  >
-                    <Badge variant="outline" className="border-0 px-0">
-                      {subcategory}
-                    </Badge>
-                    <button
-                      type="button"
-                      title="Edit subcategory"
-                      onClick={() =>
-                        setEditingSubcategory({
-                          oldName: subcategory,
-                          name: subcategory,
-                        })
-                      }
-                    >
-                      <Pencil className="h-3 w-3 text-muted-foreground" />
-                    </button>
-                    <button
-                      type="button"
-                      title="Delete subcategory"
-                      onClick={() =>
-                        setDeleteTarget({
-                          type: "subcategory",
-                          name: subcategory,
-                        })
-                      }
-                    >
-                      <Trash2 className="h-3 w-3 text-red-600" />
-                    </button>
+                  <div>
+                    <h3 className="text-[14px] font-semibold text-foreground leading-none">
+                      Content Taxonomy
+                    </h3>
+                    <p className="text-[11.5px] text-muted-foreground mt-0.5">
+                      Categories and subcategories for blogs
+                    </p>
                   </div>
-                ))}
+                </div>
+                <Button
+                  size="sm"
+                  className="h-8 bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-xs shadow-sm hover:opacity-95"
+                  onClick={() =>
+                    taxonomyTab === "categories"
+                      ? setAddCategoryOpen(true)
+                      : setAddSubcategoryOpen(true)
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Add {taxonomyTab === "categories" ? "Category" : "Subcategory"}
+                </Button>
+              </div>
+
+              {/* Segmented Switcher */}
+              <div className="flex rounded-lg bg-muted/60 p-0.5 border border-border/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTaxonomyTab("categories");
+                    setTaxonomySearch("");
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                    taxonomyTab === "categories"
+                      ? "bg-background text-foreground shadow-sm font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Folder className="h-3.5 w-3.5 text-violet-500" />
+                  <span>Categories</span>
+                  <span className="text-[10.5px] px-1.5 py-0.2 rounded-full bg-muted font-normal text-muted-foreground">
+                    {contentOptions?.categories?.length || 0}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTaxonomyTab("subcategories");
+                    setTaxonomySearch("");
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                    taxonomyTab === "subcategories"
+                      ? "bg-background text-foreground shadow-sm font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Tag className="h-3.5 w-3.5 text-indigo-500" />
+                  <span>Subcategories</span>
+                  <span className="text-[10.5px] px-1.5 py-0.2 rounded-full bg-muted font-normal text-muted-foreground">
+                    {contentOptions?.subcategories?.length || 0}
+                  </span>
+                </button>
+              </div>
+
+              {/* Search filter */}
+              <div className="relative mt-2.5">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={taxonomySearch}
+                  onChange={(e) => setTaxonomySearch(e.target.value)}
+                  placeholder={`Search ${taxonomyTab}...`}
+                  className="h-8 pl-8 text-xs bg-background/80"
+                />
+              </div>
+            </div>
+
+            <CardContent className="p-3 sm:p-4">
+              <div className="max-h-[380px] overflow-y-auto space-y-1.5 pr-1">
+                {taxonomyTab === "categories" ? (
+                  categoriesList.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-muted-foreground">
+                      <Folder className="h-8 w-8 mx-auto text-muted-foreground/40 mb-1.5" />
+                      {taxonomySearch ? "No categories matching search" : "No categories yet."}
+                    </div>
+                  ) : (
+                    categoriesList.map((category) => (
+                      <div
+                        key={category}
+                        className="flex items-center justify-between p-2 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/50 hover:border-violet-200 dark:hover:border-violet-900 transition-colors group"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="h-6 w-6 rounded-md bg-violet-100/80 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
+                            <Folder className="h-3 w-3" />
+                          </div>
+                          <span className="text-[12.5px] font-medium text-foreground truncate">
+                            {category}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                            onClick={() =>
+                              setEditingCategory({
+                                oldName: category,
+                                name: category,
+                              })
+                            }
+                            title="Rename category"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                            onClick={() =>
+                              setDeleteTarget({
+                                type: "category",
+                                name: category,
+                              })
+                            }
+                            title="Delete category"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )
+                ) : (
+                  subcategoriesList.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-muted-foreground">
+                      <Tag className="h-8 w-8 mx-auto text-muted-foreground/40 mb-1.5" />
+                      {taxonomySearch ? "No subcategories matching search" : "No subcategories yet."}
+                    </div>
+                  ) : (
+                    subcategoriesList.map((subcategory) => (
+                      <div
+                        key={subcategory}
+                        className="flex items-center justify-between p-2 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/50 hover:border-indigo-200 dark:hover:border-indigo-900 transition-colors group"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="h-6 w-6 rounded-md bg-indigo-100/80 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                            <Tag className="h-3 w-3" />
+                          </div>
+                          <span className="text-[12.5px] font-medium text-foreground truncate">
+                            {subcategory}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                            onClick={() =>
+                              setEditingSubcategory({
+                                oldName: subcategory,
+                                name: subcategory,
+                              })
+                            }
+                            title="Rename subcategory"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                            onClick={() =>
+                              setDeleteTarget({
+                                type: "subcategory",
+                                name: subcategory,
+                              })
+                            }
+                            title="Delete subcategory"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )
+                )}
               </div>
             </CardContent>
           </Card>

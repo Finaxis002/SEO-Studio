@@ -17,6 +17,8 @@ import {
   ChevronDown,
   Plus,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 dayjs.extend(relativeTime);
@@ -435,31 +437,179 @@ export function CharCount({ value, max, min }) {
   );
 }
 
-export function Pagination({ page, pages, onPage }) {
-  if (pages <= 1) return null;
+export function Pagination({
+  page,
+  pages,
+  onPage,
+  total,
+  limit = 10,
+  onLimitChange,
+  pageSizeOptions = [10, 25, 50, 100],
+  itemName = "items",
+  showQuickJump = true,
+}) {
+  if (pages <= 1 && !total) return null;
+
+  const start = total ? Math.min((page - 1) * limit + 1, total) : null;
+  const end = total ? Math.min(page * limit, total) : null;
+
+  // Generate sliding window of pages
+  const pageNumbers = useMemo(() => {
+    if (pages <= 7) {
+      return Array.from({ length: pages }, (_, i) => i + 1);
+    }
+    if (page <= 4) {
+      return [1, 2, 3, 4, 5, "...", pages];
+    }
+    if (page >= pages - 3) {
+      return [
+        1,
+        "...",
+        pages - 4,
+        pages - 3,
+        pages - 2,
+        pages - 1,
+        pages,
+      ];
+    }
+    return [1, "...", page - 1, page, page + 1, "...", pages];
+  }, [page, pages]);
+
+  const [jumpVal, setJumpVal] = useState("");
+
+  const handleJump = (e) => {
+    e?.preventDefault?.();
+    const val = parseInt(jumpVal, 10);
+    if (!isNaN(val) && val >= 1 && val <= pages && val !== page) {
+      onPage(val);
+      setJumpVal("");
+    }
+  };
+
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-      <p className="text-xs text-muted-foreground">
-        Page {page} of {pages}
-      </p>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={page <= 1}
-          onClick={() => onPage(page - 1)}
-        >
-          Previous
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={page >= pages}
-          onClick={() => onPage(page + 1)}
-        >
-          Next
-        </Button>
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-border/80 bg-card/40">
+      {/* Left side: Count info & Rows per page */}
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground font-medium">
+        {total ? (
+          <span>
+            Showing <strong className="font-semibold text-foreground">{start}</strong> to{" "}
+            <strong className="font-semibold text-foreground">{end}</strong> of{" "}
+            <strong className="font-semibold text-foreground">{total}</strong> {itemName}
+          </span>
+        ) : (
+          <span>
+            Page <strong className="font-semibold text-foreground">{page}</strong> of{" "}
+            <strong className="font-semibold text-foreground">{pages}</strong>
+          </span>
+        )}
+
+        {onLimitChange && (
+          <div className="flex items-center gap-1.5 pl-3 border-l border-border">
+            <span className="text-muted-foreground hidden sm:inline">Per page:</span>
+            <Select
+              value={String(limit)}
+              onValueChange={(val) => onLimitChange(Number(val))}
+            >
+              <SelectTrigger className="h-7 w-[68px] text-xs font-medium">
+                <SelectValue placeholder={limit} />
+              </SelectTrigger>
+              <SelectContent>
+                {pageSizeOptions.map((opt) => (
+                  <SelectItem key={opt} value={String(opt)} className="text-xs">
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {/* Quick Jump Input */}
+        {showQuickJump && pages > 1 && (
+          <form
+            onSubmit={handleJump}
+            className="flex items-center gap-1.5 pl-3 border-l border-border text-xs text-muted-foreground"
+          >
+            <span>Go to:</span>
+            <Input
+              type="number"
+              min="1"
+              max={pages}
+              placeholder={String(page)}
+              value={jumpVal}
+              onChange={(e) => setJumpVal(e.target.value)}
+              onBlur={handleJump}
+              className="h-7 w-12 text-center text-xs px-1 py-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+          </form>
+        )}
       </div>
+
+      {/* Right side: Navigation Controls */}
+      {pages > 1 && (
+        <div className="flex items-center gap-1.5">
+          {/* Previous */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1"
+            disabled={page <= 1}
+            onClick={() => onPage(page - 1)}
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Prev</span>
+          </Button>
+
+          {/* Desktop Page Numbers */}
+          <div className="hidden sm:flex items-center gap-1">
+            {pageNumbers.map((p, idx) => {
+              if (p === "...") {
+                return (
+                  <span
+                    key={`ellipsis-${idx}`}
+                    className="h-8 w-8 flex items-center justify-center text-xs text-muted-foreground select-none"
+                  >
+                    …
+                  </span>
+                );
+              }
+              const isCurrent = p === page;
+              return (
+                <Button
+                  key={p}
+                  size="icon"
+                  variant={isCurrent ? "default" : "outline"}
+                  className={`h-8 w-8 text-xs font-semibold transition-all ${
+                    isCurrent
+                      ? "bg-violet-600 hover:bg-violet-700 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  }`}
+                  onClick={() => onPage(p)}
+                >
+                  {p}
+                </Button>
+              );
+            })}
+          </div>
+
+          {/* Mobile Current Page Indicator */}
+          <span className="sm:hidden text-xs font-semibold px-2 py-1 bg-muted rounded-md text-foreground">
+            {page} / {pages}
+          </span>
+
+          {/* Next */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1"
+            disabled={page >= pages}
+            onClick={() => onPage(page + 1)}
+          >
+            <span className="hidden sm:inline">Next</span>
+            <ChevronRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
