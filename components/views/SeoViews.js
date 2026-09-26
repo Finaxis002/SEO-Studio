@@ -124,8 +124,26 @@ export function SeoIssues({ navigate }) {
                 </div>
                 <p className="text-[12.5px] text-muted-foreground mt-1">{iss.description}</p>
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  {iss.affected.slice(0, 4).map((a, i) => <Badge key={i} variant="outline" className="text-[10.5px] font-normal bg-muted/50 max-w-[260px] truncate">{a.title}</Badge>)}
-                  {iss.affected.length > 4 && <Badge variant="outline" className="text-[10.5px]">+{iss.affected.length - 4} more</Badge>}
+                  {iss.affected.slice(0, 6).map((a, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        if (iss.fixTarget === 'media') navigate('media', {})
+                        else if (a.id) navigate('editor', { id: a.id, focus: iss.fixTarget })
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-border/80 bg-muted/40 hover:bg-violet-50 hover:border-violet-300 hover:text-violet-700 dark:hover:bg-violet-950/40 dark:hover:border-violet-700 dark:hover:text-violet-300 text-[11px] font-medium max-w-[280px] truncate transition-colors cursor-pointer text-left group"
+                      title={`Fix in "${a.title || a.name || 'this item'}"`}
+                    >
+                      <span className="truncate">{a.title || a.name || 'Untitled'}</span>
+                      <ArrowRight className="h-2.5 w-2.5 opacity-40 group-hover:opacity-100 shrink-0 transition-opacity" />
+                    </button>
+                  ))}
+                  {iss.affected.length > 6 && (
+                    <Badge variant="outline" className="text-[10.5px] font-normal self-center">
+                      +{iss.affected.length - 6} more
+                    </Badge>
+                  )}
                 </div>
               </div>
               <Button onClick={() => {

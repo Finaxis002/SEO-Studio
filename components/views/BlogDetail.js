@@ -47,6 +47,7 @@ import {
   timeAgo,
   initials,
   getVinimayBlogUrl,
+  getVinimayUrl,
 } from "@/lib/client";
 import { analyzeSeo } from "@/lib/seo";
 import {
@@ -678,6 +679,17 @@ export default function BlogDetail({ blogId, navigate, can }) {
               <div
                 className="prose-studio max-w-3xl"
                 dangerouslySetInnerHTML={{ __html: b.contentHtml }}
+                onClick={(e) => {
+                  const a = e.target.closest("a");
+                  if (!a) return;
+                  const href = a.getAttribute("href");
+                  if (!href) return;
+                  e.preventDefault();
+                  const targetUrl = href.startsWith("http")
+                    ? href
+                    : getVinimayUrl(href);
+                  window.open(targetUrl, "_blank", "noopener,noreferrer");
+                }}
               />
             </CardContent>
           </Card>
@@ -832,17 +844,32 @@ export default function BlogDetail({ blogId, navigate, can }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-[14px]">Internal links</CardTitle>
+                <CardTitle className="text-[14px] flex items-center justify-between">
+                  <span>Internal links ({internalHrefs.length})</span>
+                  <span className="text-[11px] font-normal text-muted-foreground">
+                    Vinimay website
+                  </span>
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {internalHrefs.length ? (
                   internalHrefs.map((h, i) => (
                     <div
                       key={i}
-                      className="flex items-center gap-2 text-[13px] rounded-lg border border-border px-3 py-2"
+                      className="flex items-center justify-between gap-2 text-[13px] rounded-lg border border-border px-3 py-2 hover:border-violet-300 dark:hover:border-violet-700 transition-colors"
                     >
-                      <Link2 className="h-3.5 w-3.5 text-violet-500" />
-                      <span className="truncate">{h}</span>
+                      <div className="flex items-center gap-2 truncate min-w-0">
+                        <Link2 className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+                        <span className="truncate font-mono text-xs">{h}</span>
+                      </div>
+                      <a
+                        href={getVinimayUrl(h)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11.5px] font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400 hover:underline shrink-0"
+                      >
+                        Open on Vinimay <ExternalLink className="h-3 w-3" />
+                      </a>
                     </div>
                   ))
                 ) : (
@@ -855,17 +882,27 @@ export default function BlogDetail({ blogId, navigate, can }) {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-[14px]">External links</CardTitle>
+                <CardTitle className="text-[14px]">External links ({externalHrefs.length})</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {externalHrefs.length ? (
                   externalHrefs.map((h, i) => (
                     <div
                       key={i}
-                      className="flex items-center gap-2 text-[13px] rounded-lg border border-border px-3 py-2"
+                      className="flex items-center justify-between gap-2 text-[13px] rounded-lg border border-border px-3 py-2 hover:border-sky-300 dark:hover:border-sky-700 transition-colors"
                     >
-                      <ExternalLink className="h-3.5 w-3.5 text-sky-500" />
-                      <span className="truncate">{h}</span>
+                      <div className="flex items-center gap-2 truncate min-w-0">
+                        <ExternalLink className="h-3.5 w-3.5 text-sky-500 shrink-0" />
+                        <span className="truncate font-mono text-xs">{h}</span>
+                      </div>
+                      <a
+                        href={h}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11.5px] font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400 hover:underline shrink-0"
+                      >
+                        Visit <ExternalLink className="h-3 w-3" />
+                      </a>
                     </div>
                   ))
                 ) : (

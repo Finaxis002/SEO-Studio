@@ -66,9 +66,8 @@ import {
   Hash,
   Search,
   Send,
-  RotateCcw,     
+  RotateCcw,
   FileUp,
- 
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -78,6 +77,7 @@ import mammoth from "mammoth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -115,8 +115,15 @@ import {
   TIMEZONES,
   STATUS_META,
   getVinimayBlogUrl,
+  getVinimayUrl,
 } from "@/lib/client";
-import { analyzeSeo, slugify } from "@/lib/seo";
+import {
+  analyzeSeo,
+  slugify,
+  normalizeLinkHref,
+  normalizeHtmlContent,
+  extractBlogSlugFromInput,
+} from "@/lib/seo";
 import {
   ScoreRing,
   ChipInput,
@@ -276,6 +283,7 @@ const emptyForm = () => ({
 export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const isEdit = !!blogId;
   const [id, setId] = useState(blogId);
+  const idRef = useRef(blogId || null);
   const [form, setForm] = useState(emptyForm());
   const [loading, setLoading] = useState(isEdit);
   const [dirty, setDirty] = useState(false);
@@ -295,6 +303,21 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     else setImgDialog(s);
   };
   const [linkDialog, setLinkDialog] = useState(null); // {url, text, newTab}
+  const [linkTab, setLinkTab] = useState("blog"); // "blog" | "vinimay" | "external"
+  const [blogLinkSearch, setBlogLinkSearch] = useState("");
+
+  function openLinkDialog(data) {
+    const url = data?.url || "";
+    if (url.startsWith("/blogs/") || (!url && !data?.editAnchor)) {
+      setLinkTab("blog");
+    } else if (url.includes("vinimay.sharda.co.in") || url.startsWith("/")) {
+      setLinkTab("vinimay");
+    } else {
+      setLinkTab("external");
+    }
+    setBlogLinkSearch("");
+    setLinkDialog(data);
+  }
   const [dismissed, setDismissed] = useState([]);
   const [outline, setOutline] = useState(null);
   const [outlineLoading, setOutlineLoading] = useState(false);
@@ -323,8 +346,8 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   });
 
   const editorRef = useRef(null);
-const documentInputRef = useRef(null);
-const textInputRef = useRef(null);
+  const documentInputRef = useRef(null);
+  const textInputRef = useRef(null);
   const savedRange = useRef(null);
   const fileRef = useRef(null);
   const fileMode = useRef("content");
@@ -488,31 +511,75 @@ const textInputRef = useRef(null);
         setLastSaved(b.updatedAt);
         setDirty(false);
         setHasChanges(false);
-        if (focus) {
-          const map = {
-            meta: "meta",
-            seo: "seo",
-            links: "links",
-            title: "seo",
-          };
-          setTab(map[focus] || "seo");
-          if (focus === "content")
-            setTimeout(
-              () =>
-                editorRef.current?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "center",
-                }),
-              400,
-            );
-          if (focus === "media") setHighlight("featured");
-          setTimeout(() => setHighlight(null), 2600);
-        }
       })
       .catch(() => toast.error("Could not load this blog"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Handle auto-focusing on specific fields when navigating from SEO audit/issues
+  useEffect(() => {
+    if (!focus || loading) return;
+
+    if (focus === "meta") {
+      setTab("meta");
+      setSeoSheetOpen(true);
+      setTimeout(() => {
+        const el = document.getElementById("f-meta-description");
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        el?.focus();
+      }, 350);
+    } else if (focus === "title") {
+      setTab("meta");
+      setSeoSheetOpen(true);
+      setTimeout(() => {
+        const el =
+          document.getElementById("f-seo-title") ||
+          document.getElementById("f-title");
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        el?.focus();
+      }, 350);
+    } else if (focus === "seo") {
+      setTab("seo");
+      setSeoSheetOpen(true);
+      setTimeout(() => {
+        const el = document.getElementById("f-focus-keyword");
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        el?.focus();
+      }, 350);
+    } else if (focus === "links") {
+      setSeoSheetOpen(false);
+      setTimeout(() => {
+        editorRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+        editorRef.current?.focus();
+        toast.info(
+          "Add an internal link by highlighting text and clicking the link button 🔗",
+        );
+      }, 350);
+    } else if (focus === "content") {
+      setSeoSheetOpen(false);
+      setTimeout(() => {
+        editorRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+        editorRef.current?.focus();
+      }, 350);
+    } else if (focus === "media") {
+      setHighlight("featured");
+      setTimeout(() => {
+        const el =
+          document.getElementById("f-featured-alt") ||
+          document.getElementById("featured-card");
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        el?.focus?.();
+      }, 350);
+      setTimeout(() => setHighlight(null), 3000);
+    }
+  }, [focus, loading]);
 
   // Put initial HTML into the editor once loaded
   useEffect(() => {
@@ -571,7 +638,7 @@ const textInputRef = useRef(null);
           } else if (foundBlog) {
             status = "draft";
           } else {
-            status = "broken_404";
+            status = "internal";
           }
         } else {
           status = "vinimay_page";
@@ -606,7 +673,8 @@ const textInputRef = useRef(null);
   const hasSeoInput = !!(
     form.title?.trim() ||
     form.seo?.focusKeyword?.trim() ||
-    (form.contentHtml && form.contentHtml.replace(/<[^>]*>/g, "").trim().length > 10)
+    (form.contentHtml &&
+      form.contentHtml.replace(/<[^>]*>/g, "").trim().length > 10)
   );
 
   const projectedAnalysis = useMemo(() => {
@@ -670,7 +738,8 @@ const textInputRef = useRef(null);
     if (
       s.focusKeyword &&
       form.seo?.focusKeyword &&
-      s.focusKeyword.toLowerCase().trim() !== form.seo.focusKeyword.toLowerCase().trim()
+      s.focusKeyword.toLowerCase().trim() !==
+        form.seo.focusKeyword.toLowerCase().trim()
     ) {
       const testScore = analyzeSeo(
         {
@@ -722,7 +791,9 @@ const textInputRef = useRef(null);
         key: "metaDescription",
         label: "Meta Description",
         badge: null,
-        charHint: s.metaDescription ? `${s.metaDescription.length} / 160 chars` : null,
+        charHint: s.metaDescription
+          ? `${s.metaDescription.length} / 160 chars`
+          : null,
         current: form.seo?.metaDescription || "(Not set)",
         suggested: s.metaDescription,
       },
@@ -769,7 +840,9 @@ const textInputRef = useRef(null);
         if (!s.introParagraph) return false;
         if (
           form.contentHtml &&
-          form.contentHtml.toLowerCase().includes(s.introParagraph.trim().toLowerCase())
+          form.contentHtml
+            .toLowerCase()
+            .includes(s.introParagraph.trim().toLowerCase())
         ) {
           return false;
         }
@@ -777,14 +850,16 @@ const textInputRef = useRef(null);
       }
 
       if (card.key === "secondaryKeywords") {
-        const currentSec = (form.seo?.secondaryKeywords || []).map((k) =>
-          k.trim().toLowerCase()
-        ).filter(Boolean);
+        const currentSec = (form.seo?.secondaryKeywords || [])
+          .map((k) => k.trim().toLowerCase())
+          .filter(Boolean);
         const suggestedSec = (
           Array.isArray(s.secondaryKeywords)
             ? s.secondaryKeywords
             : (s.secondaryKeywords || "").split(",")
-        ).map((k) => k.trim().toLowerCase()).filter(Boolean);
+        )
+          .map((k) => k.trim().toLowerCase())
+          .filter(Boolean);
 
         if (
           suggestedSec.length > 0 &&
@@ -796,7 +871,10 @@ const textInputRef = useRef(null);
       }
 
       if (card.key === "slug") {
-        const curSlug = (form.slug || "").replace(/^\/+/, "").trim().toLowerCase();
+        const curSlug = (form.slug || "")
+          .replace(/^\/+/, "")
+          .trim()
+          .toLowerCase();
         const sugSlug = (s.slug || "").replace(/^\/+/, "").trim().toLowerCase();
         if (curSlug && sugSlug && curSlug === sugSlug) {
           return false;
@@ -805,7 +883,10 @@ const textInputRef = useRef(null);
       }
 
       if (card.current && card.current !== "(Not set)" && card.suggested) {
-        if (card.current.trim().toLowerCase() === card.suggested.trim().toLowerCase()) {
+        if (
+          card.current.trim().toLowerCase() ===
+          card.suggested.trim().toLowerCase()
+        ) {
           return false;
         }
       }
@@ -850,7 +931,8 @@ const textInputRef = useRef(null);
       if (
         res.focusKeyword &&
         form.seo?.focusKeyword &&
-        res.focusKeyword.toLowerCase().trim() !== form.seo.focusKeyword.toLowerCase().trim()
+        res.focusKeyword.toLowerCase().trim() !==
+          form.seo.focusKeyword.toLowerCase().trim()
       ) {
         const testWithNewKw = analyzeSeo(
           {
@@ -887,7 +969,9 @@ const textInputRef = useRef(null);
     const sel = selectedSuggestions;
 
     // Build updated contentHtml
-    let html = editorRef.current ? editorRef.current.innerHTML : form.contentHtml || "";
+    let html = editorRef.current
+      ? editorRef.current.innerHTML
+      : form.contentHtml || "";
     html = insertSuggestionsIntoHtml(
       html,
       sel.introParagraph ? s.introParagraph : null,
@@ -896,7 +980,8 @@ const textInputRef = useRef(null);
 
     // Build updated SEO object
     const seoUpdates = {};
-    if (sel.focusKeyword && s.focusKeyword) seoUpdates.focusKeyword = s.focusKeyword;
+    if (sel.focusKeyword && s.focusKeyword)
+      seoUpdates.focusKeyword = s.focusKeyword;
     if (sel.seoTitle && s.seoTitle) {
       seoUpdates.metaTitle = s.seoTitle;
       seoUpdates.ogTitle = s.seoTitle;
@@ -911,12 +996,17 @@ const textInputRef = useRef(null);
       seoUpdates.secondaryKeywords = Array.from(
         new Set([
           ...(form.seo?.secondaryKeywords || []),
-          ...(Array.isArray(s.secondaryKeywords) ? s.secondaryKeywords : [s.secondaryKeywords]),
+          ...(Array.isArray(s.secondaryKeywords)
+            ? s.secondaryKeywords
+            : [s.secondaryKeywords]),
         ]),
       );
     }
 
-    const formUpdates = { contentHtml: html, seo: { ...form.seo, ...seoUpdates } };
+    const formUpdates = {
+      contentHtml: html,
+      seo: { ...form.seo, ...seoUpdates },
+    };
     if (sel.slug && s.slug) {
       formUpdates.slug = s.slug;
       formUpdates.slugEdited = true;
@@ -969,13 +1059,8 @@ const textInputRef = useRef(null);
       let rawHtml = editorRef.current
         ? editorRef.current.innerHTML
         : form.contentHtml;
-      // Auto-normalize any legacy /blog/ links to /blogs/ for Vinimay website
-      const sanitizedHtml = (rawHtml || "")
-        .replace(/href=["']\/blog\/([^"']+)["']/gi, 'href="/blogs/$1"')
-        .replace(
-          /href=["']https?:\/\/vinimay\.sharda\.co\.in\/blog\/([^"']+)["']/gi,
-          'href="/blogs/$1"',
-        );
+      // Auto-normalize all links (internal blog links, Vinimay pages, protocol fixes)
+      const sanitizedHtml = normalizeHtmlContent(rawHtml || "");
       if (editorRef.current && editorRef.current.innerHTML !== sanitizedHtml) {
         editorRef.current.innerHTML = sanitizedHtml;
       }
@@ -998,8 +1083,9 @@ const textInputRef = useRef(null);
         savedSuggestions: form.savedSuggestions,
         publishedAt: form.publishedAt !== undefined ? form.publishedAt : null,
       };
-      if (id) {
-        const b = await api("/blogs/" + id, { method: "PUT", body: payload });
+      const activeId = id || idRef.current;
+      if (activeId) {
+        const b = await api("/blogs/" + activeId, { method: "PUT", body: payload });
         setLastSaved(b.updatedAt);
         setForm((f) => ({
           ...f,
@@ -1092,7 +1178,6 @@ const textInputRef = useRef(null);
     }
   }
 
-  const idRef = useRef(null);
   useEffect(() => {
     idRef.current = id;
   }, [id]);
@@ -1156,25 +1241,25 @@ const textInputRef = useRef(null);
   }
 
   function getCurrentFontWeight() {
-  const sel = window.getSelection();
+    const sel = window.getSelection();
 
-  if (!sel || !sel.rangeCount || !editorRef.current) return 400;
+    if (!sel || !sel.rangeCount || !editorRef.current) return 400;
 
-  const container = sel.getRangeAt(0).startContainer;
+    const container = sel.getRangeAt(0).startContainer;
 
-  const element =
-    container.nodeType === Node.ELEMENT_NODE
-      ? container
-      : container.parentElement;
+    const element =
+      container.nodeType === Node.ELEMENT_NODE
+        ? container
+        : container.parentElement;
 
-  if (!element || !editorRef.current.contains(element)) return 400;
+    if (!element || !editorRef.current.contains(element)) return 400;
 
-  const weight = window.getComputedStyle(element).fontWeight;
+    const weight = window.getComputedStyle(element).fontWeight;
 
-  const numericWeight = parseInt(weight, 10);
+    const numericWeight = parseInt(weight, 10);
 
-  return Number.isFinite(numericWeight) ? numericWeight : 400;
-}
+    return Number.isFinite(numericWeight) ? numericWeight : 400;
+  }
 
   function applyFontSize(size) {
     const numericSize = Number(size);
@@ -1184,15 +1269,14 @@ const textInputRef = useRef(null);
     applyInlineStyle("fontSize", `${nextSize}px`);
   }
 
+  function applyFontWeight(weight) {
+    const numericWeight = Number(weight);
 
-function applyFontWeight(weight) {
-  const numericWeight = Number(weight);
+    if (!Number.isFinite(numericWeight)) return;
 
-  if (!Number.isFinite(numericWeight)) return;
-
-  setFontWeight(numericWeight);
-  applyInlineStyle("fontWeight", numericWeight);
-}
+    setFontWeight(numericWeight);
+    applyInlineStyle("fontWeight", numericWeight);
+  }
   function onEdit() {
     setDirty(true);
     setHasChanges(true);
@@ -1238,8 +1322,6 @@ function applyFontWeight(weight) {
     onEdit();
   }
 
-
-  
   // image & link selection inside editor
   function handleEditorClick(e) {
     if (editorRef.current) {
@@ -1293,7 +1375,7 @@ function applyFontWeight(weight) {
           } else if (foundBlog) {
             status = "draft";
           } else {
-            status = "broken_404";
+            status = "internal";
           }
         } else {
           status = "vinimay_page";
@@ -1301,7 +1383,8 @@ function applyFontWeight(weight) {
       }
 
       const rect = a.getBoundingClientRect();
-      const parentRect = editorRef.current.parentElement.getBoundingClientRect();
+      const parentRect =
+        editorRef.current.parentElement.getBoundingClientRect();
 
       setLinkBarPos({
         top: Math.max(
@@ -1346,17 +1429,11 @@ function applyFontWeight(weight) {
       });
 
       const rect = img.getBoundingClientRect();
-      const parentRect = editorRef.current.parentElement.getBoundingClientRect();
+      const parentRect =
+        editorRef.current.parentElement.getBoundingClientRect();
       setImgBarPos({
-        top:
-          rect.top -
-          parentRect.top +
-          editorRef.current.scrollTop -
-          48,
-        left:
-          rect.left -
-          parentRect.left +
-          editorRef.current.scrollLeft,
+        top: rect.top - parentRect.top + editorRef.current.scrollTop - 48,
+        left: rect.left - parentRect.left + editorRef.current.scrollLeft,
       });
       setLinkBar(null);
     } else {
@@ -1394,9 +1471,9 @@ function applyFontWeight(weight) {
               (b) => b.slug?.toLowerCase().trim() === linkSlug,
             );
             if (foundBlog) {
-              a.title = `[⚠ Draft Blog] ${href} (Draft - not yet live on site)`;
+              a.title = `[Draft Blog] ${href}`;
             } else {
-              a.title = `[✕ 404 NOT FOUND] ${href} - No published blog exists with this slug!`;
+              a.title = `[Internal Link] ${href}`;
             }
           }
         } else {
@@ -1414,7 +1491,7 @@ function applyFontWeight(weight) {
     const a =
       editorRef.current.querySelector(`a[href="${href}"]`) ||
       editorRef.current.querySelector(
-        `a[href="${href.replace('/blogs/', '/blog/')}"]`,
+        `a[href="${href.replace("/blogs/", "/blog/")}"]`,
       );
     if (a) {
       a.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1423,7 +1500,8 @@ function applyFontWeight(weight) {
         a.classList.remove("ring-2", "ring-violet-500", "ring-offset-2");
       }, 2000);
       const rect = a.getBoundingClientRect();
-      const parentRect = editorRef.current.parentElement.getBoundingClientRect();
+      const parentRect =
+        editorRef.current.parentElement.getBoundingClientRect();
       setLinkBarPos({
         top: Math.max(
           8,
@@ -1449,46 +1527,42 @@ function applyFontWeight(weight) {
     }
   }
 
-  
+  function handleTextSelection() {
+    const sel = window.getSelection();
 
-function handleTextSelection() {
-  const sel = window.getSelection();
+    if (
+      !sel ||
+      !sel.rangeCount ||
+      sel.isCollapsed ||
+      !editorRef.current ||
+      !editorRef.current.contains(sel.anchorNode)
+    ) {
+      setTextFormatOpen(false);
+      return;
+    }
 
-  if (
-    !sel ||
-    !sel.rangeCount ||
-    sel.isCollapsed ||
-    !editorRef.current ||
-    !editorRef.current.contains(sel.anchorNode)
-  ) {
-    setTextFormatOpen(false);
-    return;
+    const range = sel.getRangeAt(0);
+
+    const rect = range.getBoundingClientRect();
+
+    if (!rect.width && !rect.height) {
+      setTextFormatOpen(false);
+      return;
+    }
+
+    setTextFormatPosition({
+      top: rect.top - 8,
+      left: rect.left + rect.width / 2,
+    });
+
+    setFontSize(getCurrentFontSize());
+    setFontWeight(getCurrentFontWeight());
+
+    // Save selection so popup controls can modify selected text
+    savedRange.current = range.cloneRange();
+
+    setTextFormatOpen(true);
   }
-
-  const range = sel.getRangeAt(0);
-
-  const rect = range.getBoundingClientRect();
-
-  if (!rect.width && !rect.height) {
-    setTextFormatOpen(false);
-    return;
-  }
-
-  setTextFormatPosition({
-    top: rect.top - 8,
-    left: rect.left + rect.width / 2,
-  });
-
-  setFontSize(getCurrentFontSize());
-  setFontWeight(getCurrentFontWeight());
-
-  // Save selection so popup controls can modify selected text
-  savedRange.current = range.cloneRange();
-
-  setTextFormatOpen(true);
-}
-
-
 
   function updateSelectedImg(mut) {
     const bar = imgBar;
@@ -1534,122 +1608,125 @@ function handleTextSelection() {
     }
   }
 
-{/**handle text document*/}
-const handleTextImport = async (e) => {
-  const file = e.target.files?.[0];
-
-  if (!file) return;
-
-  try {
-    if (!file.name.toLowerCase().endsWith(".txt")) {
-      alert("Please select a .txt file.");
-      return;
-    }
-
-    const text = await file.text();
-
-    if (!text.trim()) {
-      alert("The text file is empty.");
-      return;
-    }
-
-    if (!editorRef.current) return;
-
-    const html = text
-      .split(/\r?\n/)
-      .map((line) => (line.trim() ? `<p>${line}</p>` : "<p><br></p>"))
-      .join("");
-
-    editorRef.current.innerHTML = html;
-
-    onEdit();
-  } catch (error) {
-    console.error("Text import failed:", error);
-    alert("Failed to import the text file.");
-  } finally {
-    e.target.value = "";
-  }
-};
-
-{/*handle import document */}
-
-const handleDocumentImport = async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  try {
-    if (
-      file.type !==
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" &&
-      !file.name.toLowerCase().endsWith(".docx")
-    ) {
-      alert("Please select a .docx document.");
-      return;
-    }
-
-    const arrayBuffer = await file.arrayBuffer();
-
-   const result = await mammoth.convertToHtml(
-  { arrayBuffer },
   {
-    convertImage: mammoth.images.imgElement(async (image) => {
-      const base64 = await image.read("base64");
+    /**handle text document*/
+  }
+  const handleTextImport = async (e) => {
+    const file = e.target.files?.[0];
 
-      // Convert base64 image into an actual File
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
+    if (!file) return;
 
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
+    try {
+      if (!file.name.toLowerCase().endsWith(".txt")) {
+        alert("Please select a .txt file.");
+        return;
       }
 
-      const extension =
-        image.contentType.split("/")[1]?.replace("jpeg", "jpg") || "png";
+      const text = await file.text();
 
-      const imageFile = new File(
-        [bytes],
-        `imported-image-${Date.now()}.${extension}`,
+      if (!text.trim()) {
+        alert("The text file is empty.");
+        return;
+      }
+
+      if (!editorRef.current) return;
+
+      const html = text
+        .split(/\r?\n/)
+        .map((line) => (line.trim() ? `<p>${line}</p>` : "<p><br></p>"))
+        .join("");
+
+      editorRef.current.innerHTML = html;
+
+      onEdit();
+    } catch (error) {
+      console.error("Text import failed:", error);
+      alert("Failed to import the text file.");
+    } finally {
+      e.target.value = "";
+    }
+  };
+
+  {
+    /*handle import document */
+  }
+
+  const handleDocumentImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      if (
+        file.type !==
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document" &&
+        !file.name.toLowerCase().endsWith(".docx")
+      ) {
+        alert("Please select a .docx document.");
+        return;
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+
+      const result = await mammoth.convertToHtml(
+        { arrayBuffer },
         {
-          type: image.contentType,
+          convertImage: mammoth.images.imgElement(async (image) => {
+            const base64 = await image.read("base64");
+
+            // Convert base64 image into an actual File
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+
+            const extension =
+              image.contentType.split("/")[1]?.replace("jpeg", "jpg") || "png";
+
+            const imageFile = new File(
+              [bytes],
+              `imported-image-${Date.now()}.${extension}`,
+              {
+                type: image.contentType,
+              },
+            );
+
+            // Upload using your existing upload system
+            const uploaded = await uploadFiles([imageFile], "content");
+
+            if (!uploaded?.length || !uploaded[0]?.url) {
+              throw new Error("Failed to upload imported image.");
+            }
+
+            const imageUrl = uploaded[0].url;
+
+            // Use your existing image HTML structure
+            return {
+              src: imageUrl,
+            };
+          }),
         },
       );
 
-      // Upload using your existing upload system
-      const uploaded = await uploadFiles([imageFile], "content");
+      const importedHtml = result.value;
 
-      if (!uploaded?.length || !uploaded[0]?.url) {
-        throw new Error("Failed to upload imported image.");
+      if (!importedHtml.trim()) {
+        alert("The document does not contain any readable content.");
+        return;
       }
 
-      const imageUrl = uploaded[0].url;
+      if (!editorRef.current) return;
 
-      // Use your existing image HTML structure
-      return {
-        src: imageUrl,
-      };
-    }),
-  },
-);
+      editorRef.current.innerHTML = importedHtml;
 
-    const importedHtml = result.value;
-
-    if (!importedHtml.trim()) {
-      alert("The document does not contain any readable content.");
-      return;
+      onEdit();
+    } catch (error) {
+      console.error("Document import failed:", error);
+      alert("Failed to import the document.");
+    } finally {
+      e.target.value = "";
     }
-
-    if (!editorRef.current) return;
-
-    editorRef.current.innerHTML = importedHtml;
-
-    onEdit();
-  } catch (error) {
-    console.error("Document import failed:", error);
-    alert("Failed to import the document.");
-  } finally {
-    e.target.value = "";
-  }
-};
-
+  };
 
   async function handleFeaturedFiles(files) {
     const created = await uploadFiles(files, "featured");
@@ -2032,76 +2109,74 @@ const handleDocumentImport = async (e) => {
   const [activeStates, setActiveStates] = useState({});
   const [fontSize, setFontSize] = useState(16);
   const [fontWeight, setFontWeight] = useState(400);
-const [textFormatOpen, setTextFormatOpen] = useState(false);
-const [textFormatPosition, setTextFormatPosition] = useState({
-  top: 0,
-  left: 0,
-});
+  const [textFormatOpen, setTextFormatOpen] = useState(false);
+  const [textFormatPosition, setTextFormatPosition] = useState({
+    top: 0,
+    left: 0,
+  });
 
-useEffect(() => {
-  const h = () => {
-    try {
-      const sel = window.getSelection();
+  useEffect(() => {
+    const h = () => {
+      try {
+        const sel = window.getSelection();
 
-      if (
-        !sel ||
-        !sel.rangeCount ||
-        !editorRef.current ||
-        !editorRef.current.contains(sel.anchorNode)
-      ) {
+        if (
+          !sel ||
+          !sel.rangeCount ||
+          !editorRef.current ||
+          !editorRef.current.contains(sel.anchorNode)
+        ) {
+          setTextFormatOpen(false);
+          return;
+        }
+
+        setActiveStates({
+          bold: document.queryCommandState("bold"),
+          italic: document.queryCommandState("italic"),
+          underline: document.queryCommandState("underline"),
+          strikeThrough: document.queryCommandState("strikeThrough"),
+          insertUnorderedList: document.queryCommandState(
+            "insertUnorderedList",
+          ),
+          insertOrderedList: document.queryCommandState("insertOrderedList"),
+          justifyFull: document.queryCommandState("justifyFull"),
+        });
+
+        setFontSize(getCurrentFontSize());
+        setFontWeight(getCurrentFontWeight());
+
+        // No selected text
+        if (sel.isCollapsed) {
+          setTextFormatOpen(false);
+          return;
+        }
+
+        const range = sel.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        if (!rect.width && !rect.height) {
+          setTextFormatOpen(false);
+          return;
+        }
+
+        setTextFormatPosition({
+          top: rect.top - 8,
+          left: rect.left + rect.width / 2,
+        });
+
+        savedRange.current = range.cloneRange();
+        setTextFormatOpen(true);
+      } catch (e) {
         setTextFormatOpen(false);
-        return;
       }
+    };
 
-      setActiveStates({
-        bold: document.queryCommandState("bold"),
-        italic: document.queryCommandState("italic"),
-        underline: document.queryCommandState("underline"),
-        strikeThrough: document.queryCommandState("strikeThrough"),
-        insertUnorderedList: document.queryCommandState(
-          "insertUnorderedList",
-        ),
-        insertOrderedList: document.queryCommandState(
-          "insertOrderedList",
-        ),
-        justifyFull: document.queryCommandState("justifyFull"),
-      });
+    document.addEventListener("selectionchange", h);
 
-      setFontSize(getCurrentFontSize());
-      setFontWeight(getCurrentFontWeight());
-
-      // No selected text
-      if (sel.isCollapsed) {
-        setTextFormatOpen(false);
-        return;
-      }
-
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-
-      if (!rect.width && !rect.height) {
-        setTextFormatOpen(false);
-        return;
-      }
-
-      setTextFormatPosition({
-        top: rect.top - 8,
-        left: rect.left + rect.width / 2,
-      });
-
-      savedRange.current = range.cloneRange();
-      setTextFormatOpen(true);
-    } catch (e) {
-      setTextFormatOpen(false);
-    }
-  };
-
-  document.addEventListener("selectionchange", h);
-
-  return () => {
-    document.removeEventListener("selectionchange", h);
-  };
-}, []);
+    return () => {
+      document.removeEventListener("selectionchange", h);
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -2133,7 +2208,7 @@ useEffect(() => {
       jumpTo={jumpTo}
       suggestions={suggestions}
       insertSuggestion={(s) =>
-        setLinkDialog({ url: s.url, text: s.title, fromSuggestion: true })
+        openLinkDialog({ url: s.url, text: s.title, fromSuggestion: true })
       }
       dismissSuggestion={(s) => {
         setDismissed((d) => [...d, s.id]);
@@ -2170,7 +2245,6 @@ useEffect(() => {
       onJumpToLink={jumpToLink}
     />
   );
-
 
   return (
     <div className="min-h-screen bg-background">
@@ -2297,7 +2371,8 @@ useEffect(() => {
                     className="h-9"
                     onClick={() => {
                       if (
-                        (form.status === "draft" || form.status === "in_review") &&
+                        (form.status === "draft" ||
+                          form.status === "in_review") &&
                         !checklistOk
                       ) {
                         toast.warning(
@@ -2310,7 +2385,8 @@ useEffect(() => {
                   >
                     <CalendarClock className="h-4 w-4 mr-1.5" />{" "}
                     <span className="hidden sm:inline">
-                      {form.status === "scheduled" || form.status === "published"
+                      {form.status === "scheduled" ||
+                      form.status === "published"
                         ? "Reschedule"
                         : "Schedule"}
                     </span>
@@ -2531,6 +2607,18 @@ useEffect(() => {
                       className="border-0 shadow-none focus-visible:ring-0"
                     />
                   </div>
+                  {form.slug &&
+                    (allBlogs?.items || []).some(
+                      (b) => b.slug === form.slug && b.id !== id,
+                    ) && (
+                      <p className="mt-1 text-xs text-destructive flex items-center gap-1">
+                        <span>⚠️</span>
+                        <span>
+                          This slug is already used by another blog. Saving will
+                          be blocked — please choose a unique slug.
+                        </span>
+                      </p>
+                    )}
                 </Labeled>
                 <Labeled label="Author" required>
                   <Select
@@ -2796,7 +2884,7 @@ useEffect(() => {
                 >
                   <Strikethrough className="h-4 w-4" />
                 </ToolBtn>
-            
+
                 <Separator orientation="vertical" className="h-5 mx-0.5" />
                 <ToolBtn
                   title="Bullet list"
@@ -2841,7 +2929,11 @@ useEffect(() => {
                     saveSel();
                     const sel = window.getSelection();
                     const selectedText = sel ? sel.toString().trim() : "";
-                    setLinkDialog({ url: "", text: selectedText, newTab: true });
+                    openLinkDialog({
+                      url: "",
+                      text: selectedText,
+                      newTab: true,
+                    });
                   }}
                 >
                   <Link2 className="h-4 w-4" />
@@ -2859,35 +2951,35 @@ useEffect(() => {
                   <ImageIcon className="h-4 w-4" />
                 </ToolBtn>
 
-              {/*insert text document */}
-                     <ToolBtn
-                     title="Import text"
-                     onClick={() => textInputRef.current?.click()}
-                      >
-                       <FileText className="h-4 w-4" />
-                       </ToolBtn>
+                {/*insert text document */}
+                <ToolBtn
+                  title="Import text"
+                  onClick={() => textInputRef.current?.click()}
+                >
+                  <FileText className="h-4 w-4" />
+                </ToolBtn>
 
-                        <input
-                        ref={textInputRef}
-                        type="file"
-                        accept=".txt"
-                        className="hidden"
-                        onChange={handleTextImport}
-                         />
-           {/*insert document*/}
-           <ToolBtn
-            title="Import document"
-           onClick={() => documentInputRef.current?.click()}
-           >
-            <FileUp className="h-4 w-4" />
-           </ToolBtn>
-          <input
-           ref={documentInputRef}
-             type="file"
-             accept=".docx"
-             className="hidden"
-             onChange={handleDocumentImport}
-              />
+                <input
+                  ref={textInputRef}
+                  type="file"
+                  accept=".txt"
+                  className="hidden"
+                  onChange={handleTextImport}
+                />
+                {/*insert document*/}
+                <ToolBtn
+                  title="Import document"
+                  onClick={() => documentInputRef.current?.click()}
+                >
+                  <FileUp className="h-4 w-4" />
+                </ToolBtn>
+                <input
+                  ref={documentInputRef}
+                  type="file"
+                  accept=".docx"
+                  className="hidden"
+                  onChange={handleDocumentImport}
+                />
 
                 <ToolBtn
                   title="Insert table"
@@ -2955,14 +3047,14 @@ useEffect(() => {
               </div>
 
               {/* Image options bar */}
-             {imgBar && (
-  <div
-    className="absolute z-50 rounded-lg border border-violet-200 bg-violet-50/95 dark:border-violet-900 dark:bg-violet-950/95 px-3 py-2 flex flex-wrap items-center gap-2 text-xs shadow-md"
-     style={{
-    top: imgBarPos.top,
-    left: imgBarPos.left,
-  }}
-  >
+              {imgBar && (
+                <div
+                  className="absolute z-50 rounded-lg border border-violet-200 bg-violet-50/95 dark:border-violet-900 dark:bg-violet-950/95 px-3 py-2 flex flex-wrap items-center gap-2 text-xs shadow-md"
+                  style={{
+                    top: imgBarPos.top,
+                    left: imgBarPos.left,
+                  }}
+                >
                   <ImageIcon className="h-4 w-4 text-violet-500" />
                   <span className="font-semibold">Image selected</span>
                   <Separator orientation="vertical" className="h-4" />
@@ -3103,9 +3195,9 @@ useEffect(() => {
                       ⚠ Draft Blog
                     </span>
                   )}
-                  {linkBar.status === "broken_404" && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
-                      ✕ 404 Not Found
+                  {linkBar.status === "internal" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      ✓ Internal Blog
                     </span>
                   )}
                   {linkBar.status === "external" && (
@@ -3126,7 +3218,10 @@ useEffect(() => {
                     }}
                   >
                     <ExternalLink className="h-3.5 w-3.5 mr-1" />
-                    Open {linkBar.status === "vinimay_page" ? "Page" : "Target"} ↗
+                    Open {linkBar.status === "vinimay_page"
+                      ? "Page"
+                      : "Target"}{" "}
+                    ↗
                   </Button>
 
                   <Button
@@ -3134,7 +3229,7 @@ useEffect(() => {
                     variant="ghost"
                     className="h-7 text-xs"
                     onClick={() => {
-                      setLinkDialog({
+                      openLinkDialog({
                         url: linkBar.href,
                         text: linkBar.text,
                         editAnchor: linkBar.el,
@@ -3179,166 +3274,167 @@ useEffect(() => {
                 </div>
               )}
 
+              {/* POWERPOINT-STYLE TEXT FORMATTING POPUP */}
+              {textFormatOpen && (
+                <div
+                  className="fixed z-50 flex items-center gap-1 rounded-lg border bg-background p-2 shadow-lg"
+                  style={{
+                    top: textFormatPosition.top,
+                    left: textFormatPosition.left,
+                    transform: "translate(-50%, -100%)",
+                  }}
+                >
+                  {/* Font Size */}
+                  <div className="flex items-center rounded-md border">
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        saveSel();
+                        applyFontSize(getCurrentFontSize() - 1);
+                      }}
+                      className="h-8 w-8 text-sm hover:bg-accent"
+                    >
+                      −
+                    </button>
 
-{/* POWERPOINT-STYLE TEXT FORMATTING POPUP */}
-{textFormatOpen && (
-  <div
-    className="fixed z-50 flex items-center gap-1 rounded-lg border bg-background p-2 shadow-lg"
-    style={{
-      top: textFormatPosition.top,
-      left: textFormatPosition.left,
-      transform: "translate(-50%, -100%)",
-    }}
-  >
-    {/* Font Size */}
-    <div className="flex items-center rounded-md border">
-      <button
-        type="button"
-        onMouseDown={(e) => {
-          e.preventDefault();
-          saveSel();
-          applyFontSize(getCurrentFontSize() - 1);
-        }}
-        className="h-8 w-8 text-sm hover:bg-accent"
-      >
-        −
-      </button>
+                    <input
+                      type="number"
+                      min="1"
+                      max="1000"
+                      value={fontSize}
+                      onMouseDown={saveSel}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
 
-      <input
-        type="number"
-        min="1"
-        max="1000"
-        value={fontSize}
-        onMouseDown={saveSel}
-        onChange={(e) => {
-          const value = Number(e.target.value);
+                        if (
+                          Number.isInteger(value) &&
+                          value > 0 &&
+                          value <= 1000
+                        ) {
+                          applyFontSize(value);
+                        }
+                      }}
+                      className="h-8 w-12 border-x bg-transparent text-center text-xs outline-none"
+                    />
 
-          if (
-            Number.isInteger(value) &&
-            value > 0 &&
-            value <= 1000
-          ) {
-            applyFontSize(value);
-          }
-        }}
-        className="h-8 w-12 border-x bg-transparent text-center text-xs outline-none"
-      />
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        saveSel();
+                        applyFontSize(getCurrentFontSize() + 1);
+                      }}
+                      className="h-8 w-8 text-sm hover:bg-accent"
+                    >
+                      +
+                    </button>
+                  </div>
 
-      <button
-        type="button"
-        onMouseDown={(e) => {
-          e.preventDefault();
-          saveSel();
-          applyFontSize(getCurrentFontSize() + 1);
-        }}
-        className="h-8 w-8 text-sm hover:bg-accent"
-      >
-        +
-      </button>
-    </div>
+                  {/* Bold */}
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveSel();
+                      exec("bold");
+                    }}
+                    className={`h-8 w-8 rounded-md text-sm font-bold hover:bg-accent ${
+                      activeStates.bold ? "bg-violet-100 text-violet-700" : ""
+                    }`}
+                  >
+                    B
+                  </button>
 
+                  {/* Italic */}
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveSel();
+                      exec("italic");
+                    }}
+                    className={`h-8 w-8 rounded-md text-sm italic hover:bg-accent ${
+                      activeStates.italic ? "bg-violet-100 text-violet-700" : ""
+                    }`}
+                  >
+                    I
+                  </button>
 
-    {/* Bold */}
-    <button
-      type="button"
-      onMouseDown={(e) => {
-        e.preventDefault();
-        saveSel();
-        exec("bold");
-      }}
-      className={`h-8 w-8 rounded-md text-sm font-bold hover:bg-accent ${
-        activeStates.bold
-          ? "bg-violet-100 text-violet-700"
-          : ""
-      }`}
-    >
-      B
-    </button>
+                  {/* Underline */}
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveSel();
+                      exec("underline");
+                    }}
+                    className={`h-8 w-8 rounded-md text-sm underline hover:bg-accent ${
+                      activeStates.underline
+                        ? "bg-violet-100 text-violet-700"
+                        : ""
+                    }`}
+                  >
+                    U
+                  </button>
 
-    {/* Italic */}
-    <button
-      type="button"
-      onMouseDown={(e) => {
-        e.preventDefault();
-        saveSel();
-        exec("italic");
-      }}
-      className={`h-8 w-8 rounded-md text-sm italic hover:bg-accent ${
-        activeStates.italic
-          ? "bg-violet-100 text-violet-700"
-          : ""
-      }`}
-    >
-      I
-    </button>
+                  <div className="h-4 w-px bg-border mx-0.5" />
 
-    {/* Underline */}
-    <button
-      type="button"
-      onMouseDown={(e) => {
-        e.preventDefault();
-        saveSel();
-        exec("underline");
-      }}
-      className={`h-8 w-8 rounded-md text-sm underline hover:bg-accent ${
-        activeStates.underline
-          ? "bg-violet-100 text-violet-700"
-          : ""
-      }`}
-    >
-      U
-    </button>
+                  {/* Convert selected text to Link */}
+                  <button
+                    type="button"
+                    title="Turn selected text into link (Ctrl+K)"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveSel();
+                      const sel = window.getSelection();
+                      const selectedText = sel ? sel.toString().trim() : "";
+                      setTextFormatOpen(false);
+                      openLinkDialog({
+                        url: "",
+                        text: selectedText,
+                        newTab: true,
+                      });
+                    }}
+                    className="h-8 px-2 flex items-center gap-1.5 rounded-md text-xs font-medium hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950 dark:hover:text-violet-300 transition-colors"
+                  >
+                    <Link2 className="h-3.5 w-3.5 text-violet-500" />
+                    <span>Link</span>
+                  </button>
+                </div>
+              )}
 
-    <div className="h-4 w-px bg-border mx-0.5" />
-
-    {/* Convert selected text to Link */}
-    <button
-      type="button"
-      title="Turn selected text into link (Ctrl+K)"
-      onMouseDown={(e) => {
-        e.preventDefault();
-        saveSel();
-        const sel = window.getSelection();
-        const selectedText = sel ? sel.toString().trim() : "";
-        setTextFormatOpen(false);
-        setLinkDialog({
-          url: "",
-          text: selectedText,
-          newTab: true,
-        });
-      }}
-      className="h-8 px-2 flex items-center gap-1.5 rounded-md text-xs font-medium hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950 dark:hover:text-violet-300 transition-colors"
-    >
-      <Link2 className="h-3.5 w-3.5 text-violet-500" />
-      <span>Link</span>
-    </button>
-  </div>
-)}
-
-       <div   
+              <div
                 ref={editorRef}
                 className="editor-area prose-studio px-6 lg:px-8  max-w-full overflow-x-hidden"
                 contentEditable
                 suppressContentEditableWarning
                 data-placeholder="Start writing your blog… Select text to format. Drop images anywhere in the article."
-             onInput={onEdit}
-onClick={handleEditorClick}
-onMouseOver={handleEditorMouseOver}
-onMouseUp={handleTextSelection}
-onBlur={saveSel}
-onKeyDown={(e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-    e.preventDefault();
-    saveSel();
-    const sel = window.getSelection();
-    const selectedText = sel ? sel.toString().trim() : "";
-    setTextFormatOpen(false);
-    setLinkDialog({ url: "", text: selectedText, newTab: true });
-  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
-    e.preventDefault();
-    exec("justifyFull");
-  }
-}}
+                onInput={onEdit}
+                onClick={handleEditorClick}
+                onMouseOver={handleEditorMouseOver}
+                onMouseUp={handleTextSelection}
+                onBlur={saveSel}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+                    e.preventDefault();
+                    saveSel();
+                    const sel = window.getSelection();
+                    const selectedText = sel ? sel.toString().trim() : "";
+                    setTextFormatOpen(false);
+                    openLinkDialog({
+                      url: "",
+                      text: selectedText,
+                      newTab: true,
+                    });
+                  } else if (
+                    (e.ctrlKey || e.metaKey) &&
+                    e.key.toLowerCase() === "j"
+                  ) {
+                    e.preventDefault();
+                    exec("justifyFull");
+                  }
+                }}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={async (e) => {
                   e.preventDefault();
@@ -3381,10 +3477,7 @@ onKeyDown={(e) => {
         </SheetContent>
       </Sheet>
 
-      <Dialog
-        open={relatedKeywordsOpen}
-        onOpenChange={setRelatedKeywordsOpen}
-      >
+      <Dialog open={relatedKeywordsOpen} onOpenChange={setRelatedKeywordsOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit related keywords</DialogTitle>
@@ -3403,8 +3496,11 @@ onKeyDown={(e) => {
                 const nextKeyword = editingKeyword.trim();
                 if (!nextKeyword) return;
                 upSeo({
-                  secondaryKeywords: form.seo.secondaryKeywords.map((keyword) =>
-                    keyword === editingKeywordOriginal ? nextKeyword : keyword,
+                  secondaryKeywords: form.seo.secondaryKeywords.map(
+                    (keyword) =>
+                      keyword === editingKeywordOriginal
+                        ? nextKeyword
+                        : keyword,
                   ),
                 });
                 setRelatedKeywordsOpen(false);
@@ -3433,61 +3529,330 @@ onKeyDown={(e) => {
         open={!!linkDialog}
         onOpenChange={(o) => !o && setLinkDialog(null)}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-[520px] w-[95vw] p-6 overflow-hidden rounded-xl">
           <DialogHeader>
             <DialogTitle>
-              {linkDialog?.fromSuggestion
-                ? "Insert internal link"
-                : "Add a link"}
+              {linkDialog?.editAnchor
+                ? "Edit Link"
+                : linkDialog?.fromSuggestion
+                  ? "Insert Internal Blog Link"
+                  : "Insert Link"}
             </DialogTitle>
             <DialogDescription>
-              {linkDialog?.fromSuggestion
-                ? "Suggested based on this blog\u2019s topic and keywords."
-                : "Link to an internal page or an external resource."}
+              Link to another published blog post, a Vinimay product page, or an
+              external reference.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-1">
-            <Labeled label="Link text">
+
+          <div className="space-y-3.5 py-1 w-full min-w-0 overflow-hidden">
+            {/* Mode selection tabs */}
+            <Tabs
+              value={linkTab}
+              onValueChange={(val) => {
+                setLinkTab(val);
+              }}
+              className="w-full min-w-0"
+            >
+              <TabsList className="grid grid-cols-3 w-full h-9 bg-muted/60 p-1 rounded-lg">
+                <TabsTrigger
+                  value="blog"
+                  className="text-xs px-1.5 h-7 font-medium rounded-md data-[state=active]:bg-background data-[state=active]:shadow-xs truncate"
+                >
+                  📝 Internal Blog
+                </TabsTrigger>
+                <TabsTrigger
+                  value="vinimay"
+                  className="text-xs px-1.5 h-7 font-medium rounded-md data-[state=active]:bg-background data-[state=active]:shadow-xs truncate"
+                >
+                  🌐 Vinimay Page
+                </TabsTrigger>
+                <TabsTrigger
+                  value="external"
+                  className="text-xs px-1.5 h-7 font-medium rounded-md data-[state=active]:bg-background data-[state=active]:shadow-xs truncate"
+                >
+                  🔗 External / URL
+                </TabsTrigger>
+              </TabsList>
+
+              {/* TAB 1: Internal Blog Search & Select */}
+              {linkTab === "blog" && (
+                <div className="pt-2.5 space-y-2 w-full min-w-0">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    Select a published blog post. Generates safe internal link (
+                    <code className="text-violet-600 dark:text-violet-400 font-semibold">
+                      /blogs/slug
+                    </code>
+                    ):
+                  </p>
+                  <div className="relative w-full min-w-0">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <Input
+                      placeholder="Search published blogs by title or keyword…"
+                      value={blogLinkSearch}
+                      onChange={(e) => setBlogLinkSearch(e.target.value)}
+                      className="pl-8 h-8 text-xs bg-background w-full"
+                    />
+                  </div>
+                  <div className="max-h-44 overflow-y-auto space-y-1.5 rounded-lg border border-border p-1.5 bg-muted/20 w-full min-w-0">
+                    {(allBlogs?.items || [])
+                      .filter(
+                        (b) =>
+                          b.id !== id && b.status === "published" && b.slug,
+                      )
+                      .filter((b) => {
+                        if (!blogLinkSearch.trim()) return true;
+                        const raw = blogLinkSearch.trim().toLowerCase();
+                        const extracted = extractBlogSlugFromInput(raw);
+                        const bSlug = (b.slug || "").toLowerCase().trim();
+                        const bTitle = (b.title || "").toLowerCase();
+                        const bKw = (b.seo?.focusKeyword || "").toLowerCase();
+
+                        if (extracted) {
+                          if (bSlug === extracted || bSlug.includes(extracted))
+                            return true;
+                        }
+                        return (
+                          bTitle.includes(raw) ||
+                          bSlug.includes(raw) ||
+                          bKw.includes(raw)
+                        );
+                      })
+                      .slice(0, 15)
+                      .map((b) => {
+                        const targetSlug = `/blogs/${b.slug}`;
+                        const isSelected = linkDialog?.url === targetSlug;
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            onClick={() => {
+                              setLinkDialog((d) => ({
+                                ...d,
+                                url: targetSlug,
+                                text: d.text || b.title,
+                                newTab: false,
+                              }));
+                            }}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs transition-colors flex flex-col gap-0.5 border min-w-0 overflow-hidden ${
+                              isSelected
+                                ? "bg-violet-50 text-violet-950 font-semibold dark:bg-violet-950/70 dark:text-violet-100 border-violet-400 dark:border-violet-700 shadow-xs"
+                                : "hover:bg-muted/80 border-transparent hover:border-border text-foreground"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 w-full min-w-0">
+                              <span className="truncate flex-1 font-medium">
+                                {b.title}
+                              </span>
+                              {isSelected && (
+                                <Check className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400 shrink-0" />
+                              )}
+                            </div>
+                            <span className="font-mono text-[10.5px] text-muted-foreground truncate w-full">
+                              /blogs/{b.slug}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: Vinimay Main Website Pages */}
+              {linkTab === "vinimay" && (
+                <div className="pt-2.5 space-y-2.5 w-full min-w-0">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    Link to core product pages on Vinimay website:
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5 w-full">
+                    {[
+                      {
+                        label: "Home / Platform",
+                        url: "https://vinimay.sharda.co.in/",
+                      },
+                      {
+                        label: "Features",
+                        url: "https://vinimay.sharda.co.in/features",
+                      },
+                      {
+                        label: "Pricing",
+                        url: "https://vinimay.sharda.co.in/pricing",
+                      },
+                      {
+                        label: "Services",
+                        url: "https://vinimay.sharda.co.in/services",
+                      },
+                      {
+                        label: "Free Invoice",
+                        url: "https://vinimay.sharda.co.in/free-invoice",
+                      },
+                      {
+                        label: "About Us",
+                        url: "https://vinimay.sharda.co.in/about-us",
+                      },
+                    ].map((p) => (
+                      <Button
+                        key={p.url}
+                        type="button"
+                        variant={
+                          linkDialog?.url === p.url ? "default" : "outline"
+                        }
+                        size="sm"
+                        className="h-8 text-xs justify-start truncate w-full min-w-0"
+                        onClick={() => {
+                          setLinkDialog((d) => ({
+                            ...d,
+                            url: p.url,
+                            text: d.text || p.label,
+                            newTab: true,
+                          }));
+                        }}
+                      >
+                        <Globe className="h-3 w-3 mr-1.5 shrink-0 text-sky-500" />
+                        <span className="truncate">{p.label}</span>
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="w-full">
+                    <span className="text-[11px] text-muted-foreground font-medium">
+                      Or custom Vinimay section / subpage:
+                    </span>
+                    <Input
+                      value={
+                        linkDialog?.url?.startsWith(
+                          "https://vinimay.sharda.co.in",
+                        )
+                          ? linkDialog.url.replace(
+                              "https://vinimay.sharda.co.in",
+                              "",
+                            )
+                          : linkDialog?.url?.startsWith("/") &&
+                              !linkDialog?.url?.startsWith("/blogs/")
+                            ? linkDialog.url
+                            : ""
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        const path = val
+                          ? val.startsWith("/")
+                            ? val
+                            : "/" + val
+                          : "";
+                        setLinkDialog((d) => ({
+                          ...d,
+                          url: path
+                            ? `https://vinimay.sharda.co.in${path}`
+                            : "",
+                        }));
+                      }}
+                      placeholder="/features#gst-billing or /services/trip-transportation"
+                      className="h-8 text-xs mt-1 font-mono w-full"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: External Website URL */}
+              {linkTab === "external" && (
+                <div className="pt-2.5 space-y-2 w-full min-w-0">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    Enter any external reference (Govt portal, tax law, partner
+                    website):
+                  </p>
+                  <Input
+                    value={linkDialog?.url || ""}
+                    onChange={(e) =>
+                      setLinkDialog({ ...linkDialog, url: e.target.value })
+                    }
+                    placeholder="https://www.gst.gov.in or https://…"
+                    className="h-8 text-xs font-mono w-full"
+                    autoFocus
+                  />
+                </div>
+              )}
+            </Tabs>
+
+            {/* Link Text / Anchor text */}
+            <div className="space-y-1 w-full min-w-0">
+              <label className="text-[11.5px] font-medium text-foreground">
+                Link text (visible text in article)
+              </label>
               <Input
                 value={linkDialog?.text || ""}
                 onChange={(e) =>
                   setLinkDialog({ ...linkDialog, text: e.target.value })
                 }
                 placeholder="Anchor text"
+                className="h-8 text-xs w-full"
               />
-            </Labeled>
-            <Labeled label="URL">
-              <Input
-                value={linkDialog?.url || ""}
-                onChange={(e) =>
-                  setLinkDialog({ ...linkDialog, url: e.target.value })
+            </div>
+
+            {/* Destination Preview & Classification */}
+            {linkDialog?.url &&
+              (() => {
+                const norm = normalizeLinkHref(linkDialog.url);
+                const isInternal = norm.startsWith("/blogs/");
+                const isVinimay = norm.includes("vinimay.sharda.co.in");
+                const isAutoFixed = norm !== linkDialog.url.trim();
+
+                return (
+                  <div className="rounded-lg border bg-muted/40 p-2 text-xs space-y-1 w-full min-w-0 overflow-hidden">
+                    <div className="flex items-center justify-between gap-1 w-full min-w-0">
+                      <span className="text-[11px] text-muted-foreground font-medium shrink-0">
+                        Destination URL:
+                      </span>
+                      {isInternal ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 border-emerald-300 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 font-semibold shrink-0"
+                        >
+                          ✓ Internal Blog Link
+                        </Badge>
+                      ) : isVinimay ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 border-blue-300 text-blue-700 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-300 font-semibold shrink-0"
+                        >
+                          ✓ Vinimay Page
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 border-purple-300 text-purple-700 bg-purple-50 dark:bg-purple-950/40 dark:text-purple-300 font-semibold shrink-0"
+                        >
+                          🌐 External Resource
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="font-mono text-[11px] text-foreground truncate select-all w-full">
+                      {norm}
+                    </p>
+                    {isAutoFixed && (
+                      <p className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-medium">
+                        ⚡ URL automatically normalized and formatted for SEO!
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
+            {/* Open in new tab checkbox */}
+            <div className="flex items-center gap-2 pt-0.5">
+              <Checkbox
+                id="f-link-new-tab"
+                checked={!!linkDialog?.newTab}
+                onCheckedChange={(c) =>
+                  setLinkDialog((d) => ({ ...d, newTab: !!c }))
                 }
-                placeholder="/blogs/slug or https://…"
-                autoFocus
               />
-            </Labeled>
-            <div className="pt-0.5 space-y-1">
-              <span className="text-[11px] text-muted-foreground font-medium">Quick suggestions:</span>
-              <div className="flex flex-wrap gap-1">
-                {[
-                  { label: "Services", url: "/services" },
-                  { label: "Features", url: "/features" },
-                  { label: "Pricing", url: "/pricing" },
-                  { label: "Free Invoice", url: "/free-invoice" },
-                  { label: "About Us", url: "/about-us" },
-                ].map((q) => (
-                  <button
-                    key={q.url}
-                    type="button"
-                    onClick={() => setLinkDialog((d) => ({ ...d, url: q.url }))}
-                    className="px-2 py-0.5 rounded text-[11px] border border-border bg-muted/30 hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950 dark:hover:text-violet-300 transition-colors"
-                  >
-                    {q.label}
-                  </button>
-                ))}
-              </div>
+              <label
+                htmlFor="f-link-new-tab"
+                className="text-xs text-muted-foreground cursor-pointer select-none"
+              >
+                Open in new browser tab
+              </label>
             </div>
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkDialog(null)}>
               Cancel
@@ -3495,20 +3860,13 @@ onKeyDown={(e) => {
             <Button
               onClick={() => {
                 if (!linkDialog?.url) {
-                  toast.error("Please add a URL");
+                  toast.error("Please select or enter a URL");
                   return;
                 }
-                let targetUrl = linkDialog.url.trim();
-                // Auto-normalize /blog/ to /blogs/
-                if (/^\/blog\//i.test(targetUrl)) {
-                  targetUrl = targetUrl.replace(/^\/blog\//i, "/blogs/");
-                } else if (
-                  /^https?:\/\/vinimay\.sharda\.co\.in\/blog\//i.test(targetUrl)
-                ) {
-                  targetUrl = targetUrl.replace(
-                    /^https?:\/\/vinimay\.sharda\.co\.in\/blog\//i,
-                    "https://vinimay.sharda.co.in/blogs/",
-                  );
+                const targetUrl = normalizeLinkHref(linkDialog.url.trim());
+                if (!targetUrl) {
+                  toast.error("Please enter a valid URL");
+                  return;
                 }
 
                 // If editing an existing anchor node directly
@@ -3630,7 +3988,6 @@ onKeyDown={(e) => {
         onOpenChange={setScheduleOpen}
         form={form}
         onConfirm={async (iso, tz) => {
-          await save(true);
           transition("scheduled", iso);
         }}
       />
@@ -3691,7 +4048,6 @@ onKeyDown={(e) => {
                 disabled={!checklistOk}
                 onClick={async () => {
                   setChecklistOpen(false);
-                  await save(true);
                   transition("published");
                 }}
               >
@@ -3738,8 +4094,10 @@ onKeyDown={(e) => {
 
       {/* AI SEO Suggestions Dialog */}
       <Dialog open={seoSuggestOpen} onOpenChange={setSeoSuggestOpen}>
-        <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden flex flex-col" style={{ maxHeight: "88vh" }}>
-
+        <DialogContent
+          className="sm:max-w-2xl p-0 gap-0 overflow-hidden flex flex-col"
+          style={{ maxHeight: "88vh" }}
+        >
           {/* ── Compact Header ── */}
           <div className="px-5 py-3.5 border-b border-border bg-gradient-to-r from-violet-50/60 via-background to-indigo-50/40 dark:from-violet-950/20 dark:via-background dark:to-indigo-950/20 shrink-0">
             <div className="flex items-center justify-between gap-3">
@@ -3757,7 +4115,8 @@ onKeyDown={(e) => {
                     </span>
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-1">
-                    Choose suggestions to include or skip. SEO score updates live.
+                    Choose suggestions to include or skip. SEO score updates
+                    live.
                   </p>
                 </div>
               </div>
@@ -3765,12 +4124,18 @@ onKeyDown={(e) => {
               {/* Compact Score pill */}
               <div className="flex items-center gap-2 bg-white dark:bg-card border border-border/80 rounded-xl px-3 py-1.5 shadow-xs shrink-0">
                 <div className="text-center">
-                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold block leading-none">Score</span>
-                  <span className="text-[15px] font-black text-foreground">{analysis.score}</span>
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold block leading-none">
+                    Score
+                  </span>
+                  <span className="text-[15px] font-black text-foreground">
+                    {analysis.score}
+                  </span>
                 </div>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 <div className="text-center">
-                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold block leading-none">Projected</span>
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold block leading-none">
+                    Projected
+                  </span>
                   <span className="text-[15px] font-black text-violet-600 dark:text-violet-400">
                     {boostBreakdown.projected}
                   </span>
@@ -3792,7 +4157,8 @@ onKeyDown={(e) => {
               <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-violet-200/60 dark:border-violet-800/40 bg-violet-50/70 dark:bg-violet-950/30 px-3 py-2">
                 <Info className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400 mt-0.5 shrink-0" />
                 <p className="text-[11px] text-violet-800 dark:text-violet-200 leading-relaxed">
-                  <span className="font-semibold">Strategy:</span> {seoSuggestions.reasoning}
+                  <span className="font-semibold">Strategy:</span>{" "}
+                  {seoSuggestions.reasoning}
                 </p>
               </div>
             )}
@@ -3849,7 +4215,8 @@ onKeyDown={(e) => {
                     Everything is Already Well-Aligned!
                   </p>
                   <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                    Your focus keyword, title, slug, and content are already matching best SEO practices. No further changes needed.
+                    Your focus keyword, title, slug, and content are already
+                    matching best SEO practices. No further changes needed.
                   </p>
                 </div>
               ) : (
@@ -3882,7 +4249,9 @@ onKeyDown={(e) => {
                               : "border-muted-foreground/40 bg-background")
                           }
                         >
-                          {isIncluded && <Check className="h-2.5 w-2.5 stroke-[3]" />}
+                          {isIncluded && (
+                            <Check className="h-2.5 w-2.5 stroke-[3]" />
+                          )}
                         </div>
 
                         <span className="text-[12.5px] font-bold text-foreground">
@@ -3947,7 +4316,9 @@ onKeyDown={(e) => {
                       {/* Current Value (if exists) */}
                       {card.current && (
                         <p className="text-[11px] text-muted-foreground pl-6 leading-snug">
-                          <span className="font-semibold text-muted-foreground/80">Current:</span>{" "}
+                          <span className="font-semibold text-muted-foreground/80">
+                            Current:
+                          </span>{" "}
                           <span>{card.current}</span>
                         </p>
                       )}
@@ -4005,15 +4376,10 @@ onKeyDown={(e) => {
             >
               <Sparkles className="h-3.5 w-3.5" />
               Apply Selected (
-              {
-                actionableCards.filter((c) => selectedSuggestions[c.key])
-                  .length
-              }
-              )
-              {boostBreakdown && ` · Score: ${boostBreakdown.projected}/100`}
+              {actionableCards.filter((c) => selectedSuggestions[c.key]).length}
+              ){boostBreakdown && ` · Score: ${boostBreakdown.projected}/100`}
             </Button>
           </div>
-
         </DialogContent>
       </Dialog>
 
@@ -4228,15 +4594,26 @@ function EditorRail({
   const [linkSearchQuery, setLinkSearchQuery] = useState("");
   const searchResults = useMemo(() => {
     if (!linkSearchQuery.trim()) return [];
-    const q = linkSearchQuery.toLowerCase();
-    return allBlogs.filter(
-      (b) =>
-        b.id !== form.id &&
-        (b.title?.toLowerCase().includes(q) ||
-          b.slug?.toLowerCase().includes(q) ||
-          b.seo?.focusKeyword?.toLowerCase().includes(q) ||
-          (b.tags || []).some((t) => t.toLowerCase().includes(q))),
-    ).slice(0, 8);
+    const raw = linkSearchQuery.trim().toLowerCase();
+    const extracted = extractBlogSlugFromInput(raw);
+    return allBlogs
+      .filter((b) => {
+        if (b.id === form.id) return false;
+        const bSlug = (b.slug || "").toLowerCase().trim();
+        const bTitle = (b.title || "").toLowerCase();
+        const bKw = (b.seo?.focusKeyword || "").toLowerCase();
+
+        if (extracted) {
+          if (bSlug === extracted || bSlug.includes(extracted)) return true;
+        }
+        return (
+          bTitle.includes(raw) ||
+          bSlug.includes(raw) ||
+          bKw.includes(raw) ||
+          (b.tags || []).some((t) => t.toLowerCase().includes(raw))
+        );
+      })
+      .slice(0, 8);
   }, [linkSearchQuery, allBlogs, form.id]);
 
   function smartInsertLink(blog) {
@@ -4246,6 +4623,7 @@ function EditorRail({
       const sel = window.getSelection();
       if (sel && sel.rangeCount && !sel.isCollapsed) {
         document.execCommand("createLink", false, targetUrl);
+        onEdit();
         return;
       }
     }
@@ -4258,6 +4636,7 @@ function EditorRail({
       const sel = window.getSelection();
       if (sel && sel.rangeCount && !sel.isCollapsed) {
         document.execCommand("createLink", false, targetUrl);
+        onEdit();
         return;
       }
     }
@@ -4289,144 +4668,152 @@ function EditorRail({
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-muted-foreground/30 scrollbar-track-transparent">
-      {/* SEO TAB */}
-      {tab === "seo" && (
-        <CardContent className="p-4 space-y-4">
-          <div
-            className={
-              "rounded-xl border p-4 " +
-              (highlight === "featured" ? "ring-2 ring-amber-300" : "")
-            }
-          >
-            <div className="flex items-center gap-4">
-              <ScoreRing value={analysis.score} size={76} thickness={8} />
-              <div>
-                <p className="text-sm font-bold">
-                  {analysis.score >= 75
-                    ? "Strong SEO"
-                    : analysis.score >= 50
-                      ? "Needs improvement"
-                      : "Poor SEO"}
-                </p>
-                <p className="text-[11.5px] text-muted-foreground mt-0.5">
-                  {analysis.checks.filter((c) => c.ok).length} of{" "}
-                  {analysis.checks.length} checks passing
-                </p>
-                <div className="flex gap-3 mt-1.5 text-[11px] text-muted-foreground">
-                  <span>{analysis.stats.words} words</span>
-                  <span>·</span>
-                  <span>{analysis.stats.density}% density</span>
-                  <span>·</span>
-                  <span>{analysis.stats.internal} int. links</span>
+        {/* SEO TAB */}
+        {tab === "seo" && (
+          <CardContent className="p-4 space-y-4">
+            <div
+              className={
+                "rounded-xl border p-4 " +
+                (highlight === "featured" ? "ring-2 ring-amber-300" : "")
+              }
+            >
+              <div className="flex items-center gap-4">
+                <ScoreRing value={analysis.score} size={76} thickness={8} />
+                <div>
+                  <p className="text-sm font-bold">
+                    {analysis.score >= 75
+                      ? "Strong SEO"
+                      : analysis.score >= 50
+                        ? "Needs improvement"
+                        : "Poor SEO"}
+                  </p>
+                  <p className="text-[11.5px] text-muted-foreground mt-0.5">
+                    {analysis.checks.filter((c) => c.ok).length} of{" "}
+                    {analysis.checks.length} checks passing
+                  </p>
+                  <div className="flex gap-3 mt-1.5 text-[11px] text-muted-foreground">
+                    <span>{analysis.stats.words} words</span>
+                    <span>·</span>
+                    <span>{analysis.stats.density}% density</span>
+                    <span>·</span>
+                    <span>{analysis.stats.internal} int. links</span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* AI SEO SUGGESTIONS BANNER */}
-          {hasSeoInput && (
-            <div className="rounded-xl border border-violet-200/70 dark:border-violet-800/50 bg-violet-50/60 dark:bg-violet-950/20 p-3.5 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-violet-500" />
-                  <span className="text-[13px] font-bold text-violet-700 dark:text-violet-300">
-                    AI SEO Suggestions
+            {/* AI SEO SUGGESTIONS BANNER */}
+            {hasSeoInput && (
+              <div className="rounded-xl border border-violet-200/70 dark:border-violet-800/50 bg-violet-50/60 dark:bg-violet-950/20 p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-violet-500" />
+                    <span className="text-[13px] font-bold text-violet-700 dark:text-violet-300">
+                      AI SEO Suggestions
+                    </span>
+                  </div>
+                  <span className="text-[10.5px] font-medium text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-700 bg-white dark:bg-violet-950/40 px-2 py-0.5 rounded-full">
+                    Preview &amp; Choose
                   </span>
                 </div>
-                <span className="text-[10.5px] font-medium text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-700 bg-white dark:bg-violet-950/40 px-2 py-0.5 rounded-full">
-                  Preview &amp; Choose
-                </span>
+                <p className="text-[11.5px] text-violet-700/70 dark:text-violet-300/70 leading-relaxed">
+                  Auto-generate aligned Focus Keyword, SEO Title, Slug, Intro,
+                  &amp; Meta. Review before applying.
+                </p>
+                <button
+                  type="button"
+                  disabled={seoSuggestLoading}
+                  onClick={fetchSeoSuggestions}
+                  className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 disabled:opacity-60 text-white text-[13px] font-semibold transition-all"
+                >
+                  <Sparkles
+                    className={`h-3.5 w-3.5 ${seoSuggestLoading ? "animate-spin" : ""}`}
+                  />
+                  {seoSuggestLoading
+                    ? "Analyzing..."
+                    : "Get AI SEO Suggestions"}
+                </button>
               </div>
-              <p className="text-[11.5px] text-violet-700/70 dark:text-violet-300/70 leading-relaxed">
-                Auto-generate aligned Focus Keyword, SEO Title, Slug, Intro, &amp; Meta. Review before applying.
-              </p>
-              <button
-                type="button"
-                disabled={seoSuggestLoading}
-                onClick={fetchSeoSuggestions}
-                className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 disabled:opacity-60 text-white text-[13px] font-semibold transition-all"
-              >
-                <Sparkles className={`h-3.5 w-3.5 ${seoSuggestLoading ? "animate-spin" : ""}`} />
-                {seoSuggestLoading ? "Analyzing..." : "Get AI SEO Suggestions"}
-              </button>
-            </div>
-          )}
+            )}
 
-          {/* TARGET KEYWORDS SECTION (PROMINENT AT TOP) */}
-          <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-3 shadow-xs">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <KeyRound className="h-4 w-4 text-violet-500" />
-                <span className="text-[12.5px] font-semibold tracking-tight">
-                  Target Keywords
+            {/* TARGET KEYWORDS SECTION (PROMINENT AT TOP) */}
+            <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-3 shadow-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <KeyRound className="h-4 w-4 text-violet-500" />
+                  <span className="text-[12.5px] font-semibold tracking-tight">
+                    Target Keywords
+                  </span>
+                </div>
+                <span className="text-[11px] text-muted-foreground font-medium">
+                  Primary & Related
                 </span>
               </div>
+
+              <Labeled label="Focus keyword" required hint="primary target">
+                <Input
+                  id="f-focus-keyword"
+                  value={form.seo.focusKeyword}
+                  onChange={(e) => upSeo({ focusKeyword: e.target.value })}
+                  placeholder="e.g. gst invoicing rules 2025"
+                  className="bg-background"
+                />
+              </Labeled>
+
+              {kw && (
+                <div className="grid grid-cols-3 gap-2 pt-0.5">
+                  {[
+                    ["Volume", fmtNum(kw.volume)],
+                    ["Difficulty", kw.difficulty + "/100"],
+                    ["Ranking", "#" + kw.position],
+                  ].map(([l, v]) => (
+                    <div
+                      key={l}
+                      className="rounded-lg border border-border bg-background/80 px-2 py-1.5 text-center shadow-2xs"
+                    >
+                      <p className="text-[9.5px] uppercase tracking-wider text-muted-foreground font-medium">
+                        {l}
+                      </p>
+                      <p className="text-[13px] font-bold mt-0.5 text-foreground">
+                        {v}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {kw?.estimated && (
+                <p className="text-[10px] text-muted-foreground">
+                  Estimated metrics — add this keyword in the Keyword Manager
+                  for tracked data.
+                </p>
+              )}
+
+              <Labeled
+                label="Related keywords"
+                hint="Click a keyword to edit"
+              />
+              <div>
+                <ChipInput
+                  value={form.seo.secondaryKeywords}
+                  onChange={(secondaryKeywords) => upSeo({ secondaryKeywords })}
+                  placeholder="secondary, long-tail, semantic…"
+                  onChipClick={onRelatedKeywordClick}
+                />
+              </div>
+            </div>
+
+            {/* CHECKLIST HEADER */}
+            <div className="flex items-center justify-between pt-1">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Live SEO Checklist
+              </p>
               <span className="text-[11px] text-muted-foreground font-medium">
-                Primary & Related
+                {analysis.checks.filter((c) => c.ok).length} of{" "}
+                {analysis.checks.length} passing
               </span>
             </div>
 
-            <Labeled label="Focus keyword" required hint="primary target">
-              <Input
-                id="f-focus-keyword"
-                value={form.seo.focusKeyword}
-                onChange={(e) => upSeo({ focusKeyword: e.target.value })}
-                placeholder="e.g. gst invoicing rules 2025"
-                className="bg-background"
-              />
-            </Labeled>
-
-            {kw && (
-              <div className="grid grid-cols-3 gap-2 pt-0.5">
-                {[
-                  ["Volume", fmtNum(kw.volume)],
-                  ["Difficulty", kw.difficulty + "/100"],
-                  ["Ranking", "#" + kw.position],
-                ].map(([l, v]) => (
-                  <div
-                    key={l}
-                    className="rounded-lg border border-border bg-background/80 px-2 py-1.5 text-center shadow-2xs"
-                  >
-                    <p className="text-[9.5px] uppercase tracking-wider text-muted-foreground font-medium">
-                      {l}
-                    </p>
-                    <p className="text-[13px] font-bold mt-0.5 text-foreground">
-                      {v}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-            {kw?.estimated && (
-              <p className="text-[10px] text-muted-foreground">
-                Estimated metrics — add this keyword in the Keyword Manager for
-                tracked data.
-              </p>
-            )}
-
-            <Labeled label="Related keywords" hint="Click a keyword to edit" />
-            <div>
-              <ChipInput
-                value={form.seo.secondaryKeywords}
-                onChange={(secondaryKeywords) => upSeo({ secondaryKeywords })}
-                placeholder="secondary, long-tail, semantic…"
-                onChipClick={onRelatedKeywordClick}
-              />
-            </div>
-          </div>
-
-          {/* CHECKLIST HEADER */}
-          <div className="flex items-center justify-between pt-1">
-            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Live SEO Checklist
-            </p>
-            <span className="text-[11px] text-muted-foreground font-medium">
-              {analysis.checks.filter((c) => c.ok).length} of{" "}
-              {analysis.checks.length} passing
-            </span>
-          </div>
-
-          <div className="space-y-1 pr-1">
+            <div className="space-y-1 pr-1">
               {analysis.checks.map((c) => (
                 <div
                   key={c.id}
@@ -4461,869 +4848,848 @@ function EditorRail({
                   </div>
                 </div>
               ))}
-          </div>
-        </CardContent>
-      )}
-
-      {/* META TAB */}
-      {tab === "meta" && (
-        <CardContent className="p-4 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-border/70">
-            <div>
-              <p className="text-[12.5px] font-semibold text-foreground">
-                Search Engine Meta
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                High-CTR titles & descriptions
-              </p>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={generatingMeta}
-              onClick={generateSeoMetaWithAi}
-              className="h-8 text-xs gap-1.5 border-violet-200 bg-violet-50/60 hover:bg-violet-100 text-violet-700 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300"
-            >
-              <Sparkles
-                className={`h-3.5 w-3.5 ${generatingMeta ? "animate-spin" : ""}`}
-              />
-              {generatingMeta ? "Generating…" : "Generate with AI"}
-            </Button>
-          </div>
+          </CardContent>
+        )}
 
-          <Labeled
-            label="SEO title"
-            hint={
-              <CharCount
-                value={form.seo.metaTitle || form.title}
-                max={60}
-                min={30}
-              />
-            }
-          >
-            <Input
-              id="f-seo-title"
-              value={form.seo.metaTitle}
-              onChange={(e) => upSeo({ metaTitle: e.target.value })}
-              placeholder={
-                (form.title || "Blog title") + " — add your angle here"
-              }
-              maxLength={80}
-            />
-          </Labeled>
-          <Labeled
-            label="Meta description"
-            hint={
-              <CharCount value={form.seo.metaDescription} max={160} min={120} />
-            }
-          >
-            <Textarea
-              id="f-meta-description"
-              value={form.seo.metaDescription}
-              onChange={(e) => upSeo({ metaDescription: e.target.value })}
-              placeholder="Your meta description appears here in Google results…"
-              rows={3}
-              maxLength={200}
-            />
-          </Labeled>
-          <Labeled label="Canonical URL">
-            <Input
-              value={form.seo.canonical}
-              onChange={(e) => upSeo({ canonical: e.target.value })}
-              placeholder="https://example.com/blog/…"
-            />
-          </Labeled>
-          <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
-            <div>
-              <p className="text-[13px] font-medium">Index</p>
-              <p className="text-[11px] text-muted-foreground">
-                Allow search engines to index this page
-              </p>
-            </div>
-            <Switch
-              checked={form.seo.robots.index}
-              onCheckedChange={(v) =>
-                upSeo({ robots: { ...form.seo.robots, index: v } })
-              }
-            />
-          </div>
-          <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
-            <div>
-              <p className="text-[13px] font-medium">Follow links</p>
-              <p className="text-[11px] text-muted-foreground">
-                Crawlers follow links from this page
-              </p>
-            </div>
-            <Switch
-              checked={form.seo.robots.follow}
-              onCheckedChange={(v) =>
-                upSeo({ robots: { ...form.seo.robots, follow: v } })
-              }
-            />
-          </div>
-
-          <Separator />
-          <div className="rounded-lg border border-border/70 p-3 space-y-2 bg-muted/20">
-            <div className="flex items-center justify-between">
+        {/* META TAB */}
+        {tab === "meta" && (
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-border/70">
               <div>
                 <p className="text-[12.5px] font-semibold text-foreground">
-                  Publication Date
+                  Search Engine Meta
                 </p>
                 <p className="text-[11px] text-muted-foreground">
-                  Original publish timestamp displayed to Google & readers
+                  High-CTR titles & descriptions
                 </p>
               </div>
-              <Badge variant="outline" className="text-[10px] font-normal">
-                {form.publishedAt ? "Custom / Set" : "Auto on publish"}
-              </Badge>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={generatingMeta}
+                onClick={generateSeoMetaWithAi}
+                className="h-8 text-xs gap-1.5 border-violet-200 bg-violet-50/60 hover:bg-violet-100 text-violet-700 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300"
+              >
+                <Sparkles
+                  className={`h-3.5 w-3.5 ${generatingMeta ? "animate-spin" : ""}`}
+                />
+                {generatingMeta ? "Generating…" : "Generate with AI"}
+              </Button>
             </div>
-            <Input
-              type="datetime-local"
-              value={
-                form.publishedAt
-                  ? new Date(
-                      new Date(form.publishedAt).getTime() -
-                        new Date().getTimezoneOffset() * 60000,
-                    )
-                      .toISOString()
-                      .slice(0, 16)
-                  : ""
+
+            <Labeled
+              label="SEO title"
+              hint={
+                <CharCount
+                  value={form.seo.metaTitle || form.title}
+                  max={60}
+                  min={30}
+                />
               }
-              onChange={(e) => {
-                const val = e.target.value
-                  ? new Date(e.target.value).toISOString()
-                  : null;
-                setForm((f) => ({ ...f, publishedAt: val }));
-                setDirty(true);
-              }}
-              className="text-xs bg-background"
-            />
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
-              <span>
-                {form.publishedAt
-                  ? `Published: ${fmtDate(form.publishedAt)}`
-                  : "Will automatically set when published"}
-              </span>
-              <div className="flex items-center gap-2">
-                {form.publishedAt && (
+            >
+              <Input
+                id="f-seo-title"
+                value={form.seo.metaTitle}
+                onChange={(e) => upSeo({ metaTitle: e.target.value })}
+                placeholder={
+                  (form.title || "Blog title") + " — add your angle here"
+                }
+                maxLength={80}
+              />
+            </Labeled>
+            <Labeled
+              label="Meta description"
+              hint={
+                <CharCount
+                  value={form.seo.metaDescription}
+                  max={160}
+                  min={120}
+                />
+              }
+            >
+              <Textarea
+                id="f-meta-description"
+                value={form.seo.metaDescription}
+                onChange={(e) => upSeo({ metaDescription: e.target.value })}
+                placeholder="Your meta description appears here in Google results…"
+                rows={3}
+                maxLength={200}
+              />
+            </Labeled>
+            <Labeled
+              label="Canonical URL"
+              hint="Defaults to self-article URL if left empty"
+            >
+              <Input
+                id="f-canonical"
+                value={form.seo.canonical}
+                onChange={(e) => upSeo({ canonical: e.target.value })}
+                placeholder={`https://vinimay.sharda.co.in/blogs/${form.slug || "..."}`}
+              />
+            </Labeled>
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
+              <div>
+                <p className="text-[13px] font-medium">Index</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Allow search engines to index this page
+                </p>
+              </div>
+              <Switch
+                checked={form.seo.robots.index}
+                onCheckedChange={(v) =>
+                  upSeo({ robots: { ...form.seo.robots, index: v } })
+                }
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
+              <div>
+                <p className="text-[13px] font-medium">Follow links</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Crawlers follow links from this page
+                </p>
+              </div>
+              <Switch
+                checked={form.seo.robots.follow}
+                onCheckedChange={(v) =>
+                  upSeo({ robots: { ...form.seo.robots, follow: v } })
+                }
+              />
+            </div>
+
+            <Separator />
+            <div className="rounded-lg border border-border/70 p-3 space-y-2 bg-muted/20">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[12.5px] font-semibold text-foreground">
+                    Publication Date
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Original publish timestamp displayed to Google & readers
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-[10px] font-normal">
+                  {form.publishedAt ? "Custom / Set" : "Auto on publish"}
+                </Badge>
+              </div>
+              <Input
+                type="datetime-local"
+                value={
+                  form.publishedAt
+                    ? new Date(
+                        new Date(form.publishedAt).getTime() -
+                          new Date().getTimezoneOffset() * 60000,
+                      )
+                        .toISOString()
+                        .slice(0, 16)
+                    : ""
+                }
+                onChange={(e) => {
+                  const val = e.target.value
+                    ? new Date(e.target.value).toISOString()
+                    : null;
+                  setForm((f) => ({ ...f, publishedAt: val }));
+                  setDirty(true);
+                }}
+                className="text-xs bg-background"
+              />
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                <span>
+                  {form.publishedAt
+                    ? `Published: ${fmtDate(form.publishedAt)}`
+                    : "Will automatically set when published"}
+                </span>
+                <div className="flex items-center gap-2">
+                  {form.publishedAt && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForm((f) => ({ ...f, publishedAt: null }));
+                        setDirty(true);
+                      }}
+                      className="text-muted-foreground hover:text-foreground text-[11px]"
+                    >
+                      Reset to auto
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
-                      setForm((f) => ({ ...f, publishedAt: null }));
+                      setForm((f) => ({
+                        ...f,
+                        publishedAt: new Date().toISOString(),
+                      }));
                       setDirty(true);
                     }}
-                    className="text-muted-foreground hover:text-foreground text-[11px]"
+                    className="text-violet-600 dark:text-violet-400 hover:underline font-medium text-[11px]"
                   >
-                    Reset to auto
+                    Set to now
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setForm((f) => ({
-                      ...f,
-                      publishedAt: new Date().toISOString(),
-                    }));
-                    setDirty(true);
-                  }}
-                  className="text-violet-600 dark:text-violet-400 hover:underline font-medium text-[11px]"
-                >
-                  Set to now
-                </button>
+                </div>
               </div>
             </div>
-          </div>
 
-          <Separator />
-          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-            Open Graph (Facebook / LinkedIn)
-          </p>
-          <Labeled label="OG Title">
-            <Input
-              value={form.seo.ogTitle}
-              onChange={(e) => upSeo({ ogTitle: e.target.value })}
-              placeholder={form.title}
-            />
-          </Labeled>
-          <Labeled label="OG Description">
-            <Textarea
-              value={form.seo.ogDescription}
-              onChange={(e) => upSeo({ ogDescription: e.target.value })}
-              rows={2}
-              placeholder={form.seo.metaDescription || form.title}
-            />
-          </Labeled>
-          <Labeled label="OG Image">
-            <div className="flex gap-2">
+            <Separator />
+            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              Open Graph (Facebook / LinkedIn)
+            </p>
+            <Labeled label="OG Title">
               <Input
-                value={form.seo.ogImage}
-                onChange={(e) => upSeo({ ogImage: e.target.value })}
-                placeholder="Image URL"
+                value={form.seo.ogTitle}
+                onChange={(e) => upSeo({ ogTitle: e.target.value })}
+                placeholder={form.title}
               />
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-9 shrink-0"
-                onClick={() => setImgDialog({ target: "og" })}
-              >
-                <ImageIcon className="h-4 w-4" />
-              </Button>
-            </div>
-          </Labeled>
+            </Labeled>
+            <Labeled label="OG Description">
+              <Textarea
+                value={form.seo.ogDescription}
+                onChange={(e) => upSeo({ ogDescription: e.target.value })}
+                rows={2}
+                placeholder={form.seo.metaDescription || form.title}
+              />
+            </Labeled>
+            <Labeled label="OG Image">
+              <div className="flex gap-2">
+                <Input
+                  value={form.seo.ogImage}
+                  onChange={(e) => upSeo({ ogImage: e.target.value })}
+                  placeholder="Image URL"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 shrink-0"
+                  onClick={() => setImgDialog({ target: "og" })}
+                >
+                  <ImageIcon className="h-4 w-4" />
+                </Button>
+              </div>
+            </Labeled>
 
-          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-            Twitter / X card
-          </p>
-          <Labeled label="Twitter title">
-            <Input
-              value={form.seo.twitterTitle}
-              onChange={(e) => upSeo({ twitterTitle: e.target.value })}
-              placeholder={form.title}
-            />
-          </Labeled>
-          <Labeled label="Twitter description">
-            <Textarea
-              value={form.seo.twitterDescription}
-              onChange={(e) => upSeo({ twitterDescription: e.target.value })}
-              rows={2}
-              placeholder={form.seo.metaDescription || form.title}
-            />
-          </Labeled>
-          <Labeled label="Twitter image">
-            <div className="flex gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              Twitter / X card
+            </p>
+            <Labeled label="Twitter title">
               <Input
-                value={form.seo.twitterImage}
-                onChange={(e) => upSeo({ twitterImage: e.target.value })}
-                placeholder="Image URL"
+                value={form.seo.twitterTitle}
+                onChange={(e) => upSeo({ twitterTitle: e.target.value })}
+                placeholder={form.title}
               />
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-9 shrink-0"
-                onClick={() => setImgDialog({ target: "twitter" })}
-              >
-                <ImageIcon className="h-4 w-4" />
-              </Button>
-            </div>
-          </Labeled>
-
-          <Separator />
-          {/* Google preview */}
-          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-            Google search preview
-          </p>
-          <div className="rounded-xl border border-border p-4 bg-white dark:bg-card">
-            <p className="gpreview-url">
-              https://vinimay.sharda.co.in
-              <span className="text-muted-foreground">
-                {" "}
-                › blogs › {form.slug || "your-blog-slug"}
-              </span>
-            </p>
-            <p className="gpreview-title mt-1 line-clamp-1">
-              {form.seo.metaTitle ||
-                form.title ||
-                "Your SEO optimized blog title"}
-            </p>
-            <p className="gpreview-desc mt-1 line-clamp-2">
-              {form.seo.metaDescription ||
-                "Your meta description appears here in Google search results. Write 120–160 characters for the best snippet."}
-            </p>
-          </div>
-
-          {/* Social previews */}
-          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-            Social previews
-          </p>
-          <div className="rounded-xl border border-border overflow-hidden">
-            <div className="bg-muted/50 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground">
-              Facebook / LinkedIn
-            </div>
-            {(form.seo.ogImage || form.featuredImage.url) && (
-              <img
-                src={form.seo.ogImage || form.featuredImage.url}
-                alt=""
-                className="w-full h-32 object-cover"
+            </Labeled>
+            <Labeled label="Twitter description">
+              <Textarea
+                value={form.seo.twitterDescription}
+                onChange={(e) => upSeo({ twitterDescription: e.target.value })}
+                rows={2}
+                placeholder={form.seo.metaDescription || form.title}
               />
-            )}
-            <div className="p-3 bg-muted/30">
-              <p className="text-[10px] uppercase text-muted-foreground">
-                example.com
-              </p>
-              <p className="text-[13px] font-semibold leading-snug line-clamp-1">
-                {form.seo.ogTitle || form.title || "OG Title"}
-              </p>
-              <p className="text-[11.5px] text-muted-foreground line-clamp-2">
-                {form.seo.ogDescription ||
-                  form.seo.metaDescription ||
-                  "Social share description"}
-              </p>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border overflow-hidden">
-            <div className="bg-muted/50 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground">
-              Twitter / X
-            </div>
-            {(form.seo.twitterImage || form.featuredImage.url) && (
-              <img
-                src={form.seo.twitterImage || form.featuredImage.url}
-                alt=""
-                className="w-full h-32 object-cover"
-              />
-            )}
-            <div className="p-3 bg-muted/30">
-              <p className="text-[13px] font-semibold leading-snug line-clamp-1">
-                {form.seo.twitterTitle || form.title || "Twitter title"}
-              </p>
-              <p className="text-[11.5px] text-muted-foreground line-clamp-2">
-                {form.seo.twitterDescription ||
-                  form.seo.metaDescription ||
-                  "Twitter share description"}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      )}
+            </Labeled>
+            <Labeled label="Twitter image">
+              <div className="flex gap-2">
+                <Input
+                  value={form.seo.twitterImage}
+                  onChange={(e) => upSeo({ twitterImage: e.target.value })}
+                  placeholder="Image URL"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 shrink-0"
+                  onClick={() => setImgDialog({ target: "twitter" })}
+                >
+                  <ImageIcon className="h-4 w-4" />
+                </Button>
+              </div>
+            </Labeled>
 
-      {/* LINKS TAB */}
-      {tab === "links" && (
-        <CardContent className="p-4 space-y-4">
-          <div>
-            <p className="text-[13px] font-semibold">Links &amp; Health Inspector</p>
-            <p className="text-[11.5px] text-muted-foreground">
-              Monitor live in-article link health, insert Vinimay pages, or link related blogs.
+            <Separator />
+            {/* Google preview */}
+            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              Google search preview
             </p>
-          </div>
+            <div className="rounded-xl border border-border p-4 bg-white dark:bg-card">
+              <p className="gpreview-url">
+                https://vinimay.sharda.co.in
+                <span className="text-muted-foreground">
+                  {" "}
+                  › blogs › {form.slug || "your-blog-slug"}
+                </span>
+              </p>
+              <p className="gpreview-title mt-1 line-clamp-1">
+                {form.seo.metaTitle ||
+                  form.title ||
+                  "Your SEO optimized blog title"}
+              </p>
+              <p className="gpreview-desc mt-1 line-clamp-2">
+                {form.seo.metaDescription ||
+                  "Your meta description appears here in Google search results. Write 120–160 characters for the best snippet."}
+              </p>
+            </div>
 
-          {/* 1. In-Article Links (Live Health Inspector) */}
-          {(() => {
-            const brokenCount = (inArticleLinks || []).filter(
-              (l) => l.status === "broken_404",
-            ).length;
-            return (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                    In-Article Links ({inArticleLinks?.length || 0})
+            {/* Social previews */}
+            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              Social previews
+            </p>
+            <div className="rounded-xl border border-border overflow-hidden">
+              <div className="bg-muted/50 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground">
+                Facebook / LinkedIn
+              </div>
+              {(form.seo.ogImage || form.featuredImage.url) && (
+                <img
+                  src={form.seo.ogImage || form.featuredImage.url}
+                  alt=""
+                  className="w-full h-32 object-cover"
+                />
+              )}
+              <div className="p-3 bg-muted/30">
+                <p className="text-[10px] uppercase text-muted-foreground">
+                  example.com
+                </p>
+                <p className="text-[13px] font-semibold leading-snug line-clamp-1">
+                  {form.seo.ogTitle || form.title || "OG Title"}
+                </p>
+                <p className="text-[11.5px] text-muted-foreground line-clamp-2">
+                  {form.seo.ogDescription ||
+                    form.seo.metaDescription ||
+                    "Social share description"}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-xl border border-border overflow-hidden">
+              <div className="bg-muted/50 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground">
+                Twitter / X
+              </div>
+              {(form.seo.twitterImage || form.featuredImage.url) && (
+                <img
+                  src={form.seo.twitterImage || form.featuredImage.url}
+                  alt=""
+                  className="w-full h-32 object-cover"
+                />
+              )}
+              <div className="p-3 bg-muted/30">
+                <p className="text-[13px] font-semibold leading-snug line-clamp-1">
+                  {form.seo.twitterTitle || form.title || "Twitter title"}
+                </p>
+                <p className="text-[11.5px] text-muted-foreground line-clamp-2">
+                  {form.seo.twitterDescription ||
+                    form.seo.metaDescription ||
+                    "Twitter share description"}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        )}
+
+        {/* LINKS TAB */}
+        {tab === "links" && (
+          <CardContent className="p-4 space-y-4">
+            <div>
+              <p className="text-[13px] font-semibold">
+                Links &amp; Health Inspector
+              </p>
+              <p className="text-[11.5px] text-muted-foreground">
+                Monitor live in-article link health, insert Vinimay pages, or
+                link related blogs.
+              </p>
+            </div>
+
+            {/* 1. In-Article Links (Live Health Inspector) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  In-Article Links ({inArticleLinks?.length || 0})
+                </span>
+                {inArticleLinks?.length > 0 && (
+                  <span className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-medium">
+                    ✓ Active Links
                   </span>
-                  {brokenCount > 0 ? (
-                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                      {brokenCount} broken (404)
-                    </Badge>
-                  ) : inArticleLinks?.length > 0 ? (
-                    <span className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-medium">
-                      ✓ All links healthy
-                    </span>
-                  ) : null}
-                </div>
-
-                {brokenCount > 0 && (
-                  <div className="rounded-xl border border-rose-300 bg-rose-50/90 dark:border-rose-900/50 dark:bg-rose-950/40 p-3 space-y-1">
-                    <p className="text-[12px] font-semibold text-rose-800 dark:text-rose-200 flex items-center gap-1.5">
-                      <AlertTriangle className="h-4 w-4 text-rose-500 shrink-0" />
-                      Broken Link Warning!
-                    </p>
-                    <p className="text-[11px] text-rose-700 dark:text-rose-300 leading-relaxed">
-                      Target blog slug does not exist on Vinimay. This will cause 404 errors for visitors and hurt SEO rankings. Click "Jump" below to fix or update it.
-                    </p>
-                  </div>
                 )}
+              </div>
 
-                {inArticleLinks?.length === 0 ? (
-                  <p className="text-[11.5px] text-muted-foreground rounded-lg border border-dashed border-border p-3 text-center">
-                    No links in article yet. Add at least 1 internal and 1 external link for maximum SEO.
-                  </p>
-                ) : (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                    {inArticleLinks.map((l) => (
-                      <div
-                        key={l.id}
-                        className={`rounded-lg border p-2 text-xs space-y-1 transition-colors ${
-                          l.status === "broken_404"
-                            ? "border-rose-300 bg-rose-50/40 dark:border-rose-900/40 dark:bg-rose-950/20"
-                            : "border-border bg-card hover:border-violet-200"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span
-                            className="font-medium truncate max-w-[170px]"
-                            title={l.text}
+              {inArticleLinks?.length === 0 ? (
+                <p className="text-[11.5px] text-muted-foreground rounded-lg border border-dashed border-border p-3 text-center">
+                  No links in article yet. Add at least 1 internal and 1
+                  external link for maximum SEO.
+                </p>
+              ) : (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {inArticleLinks.map((l) => (
+                    <div
+                      key={l.id}
+                      className="rounded-lg border border-border bg-card hover:border-violet-200 p-2 text-xs space-y-1 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span
+                          className="font-medium truncate max-w-[170px]"
+                          title={l.text}
+                        >
+                          "{l.text}"
+                        </span>
+                        {(l.status === "live" || l.status === "internal") && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9.5px] px-1 py-0 border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300 shrink-0"
                           >
-                            "{l.text}"
-                          </span>
-                          {l.status === "live" && (
-                            <Badge
-                              variant="outline"
-                              className="text-[9.5px] px-1 py-0 border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300 shrink-0"
-                            >
-                              ✓ Live
-                            </Badge>
-                          )}
-                          {l.status === "vinimay_page" && (
-                            <Badge
-                              variant="outline"
-                              className="text-[9.5px] px-1 py-0 border-blue-300 text-blue-700 dark:border-blue-800 dark:text-blue-300 shrink-0"
-                            >
-                              ✓ Vinimay Page
-                            </Badge>
-                          )}
-                          {l.status === "draft" && (
-                            <Badge
-                              variant="outline"
-                              className="text-[9.5px] px-1 py-0 border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300 shrink-0"
-                            >
-                              ⚠ Draft
-                            </Badge>
-                          )}
-                          {l.status === "broken_404" && (
-                            <Badge
-                              variant="destructive"
-                              className="text-[9.5px] px-1 py-0 shrink-0"
-                            >
-                              ✕ 404
-                            </Badge>
-                          )}
-                          {l.status === "external" && (
-                            <Badge
-                              variant="outline"
-                              className="text-[9.5px] px-1 py-0 border-purple-300 text-purple-700 dark:border-purple-800 dark:text-purple-300 shrink-0"
-                            >
-                              External
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-[10.5px] text-muted-foreground font-mono truncate">
-                          {l.href}
-                        </p>
-                        <div className="flex items-center justify-end gap-1.5 pt-0.5">
-                          {onJumpToLink && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 px-2 text-[10.5px] text-muted-foreground hover:text-foreground"
-                              onClick={() => onJumpToLink(l.href)}
-                            >
-                              Jump
-                            </Button>
-                          )}
+                            ✓ Internal Blog
+                          </Badge>
+                        )}
+                        {l.status === "vinimay_page" && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9.5px] px-1 py-0 border-blue-300 text-blue-700 dark:border-blue-800 dark:text-blue-300 shrink-0"
+                          >
+                            ✓ Vinimay Page
+                          </Badge>
+                        )}
+                        {l.status === "draft" && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9.5px] px-1 py-0 border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300 shrink-0"
+                          >
+                            Draft
+                          </Badge>
+                        )}
+                        {l.status === "external" && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9.5px] px-1 py-0 border-purple-300 text-purple-700 dark:border-purple-800 dark:text-purple-300 shrink-0"
+                          >
+                            External
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-[10.5px] text-muted-foreground font-mono truncate">
+                        {l.href}
+                      </p>
+                      <div className="flex items-center justify-end gap-1.5 pt-0.5">
+                        {onJumpToLink && (
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-6 px-2 text-[10.5px] text-sky-600 hover:text-sky-700 dark:text-sky-400"
-                            onClick={() => window.open(l.targetUrl, "_blank")}
+                            className="h-6 px-2 text-[10.5px] text-muted-foreground hover:text-foreground"
+                            onClick={() => onJumpToLink(l.href)}
                           >
-                            <ExternalLink className="h-3 w-3 mr-1" />
-                            View ↗
+                            Jump
                           </Button>
-                        </div>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-[10.5px] text-sky-600 hover:text-sky-700 dark:text-sky-400"
+                          onClick={() => window.open(l.targetUrl, "_blank")}
+                        >
+                          <ExternalLink className="h-3 w-3 mr-1" />
+                          View ↗
+                        </Button>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* 2. Quick Vinimay Pages (1-Click Insert) */}
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Quick Vinimay Pages
+              </span>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  {
+                    title: "Accounting Software Services",
+                    label: "Services",
+                    url: "https://vinimay.sharda.co.in/services",
+                  },
+                  {
+                    title: "Accounting Software Features",
+                    label: "Features",
+                    url: "https://vinimay.sharda.co.in/features",
+                  },
+                  {
+                    title: "Accounting Software Pricing",
+                    label: "Pricing",
+                    url: "https://vinimay.sharda.co.in/pricing",
+                  },
+                  {
+                    title: "Free Invoice Software for Small Business",
+                    label: "Free Invoice",
+                    url: "https://vinimay.sharda.co.in/free-invoice",
+                  },
+                  {
+                    title: "Vinimay Accounting Software",
+                    label: "About Us",
+                    url: "https://vinimay.sharda.co.in/about-us",
+                  },
+                  {
+                    title: "Free Accounting and Billing Software",
+                    label: "Home / Platform",
+                    url: "https://vinimay.sharda.co.in/",
+                  },
+                ].map((p) => (
+                  <Button
+                    key={p.url}
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px] justify-start truncate"
+                    title={`Insert link to ${p.url} (Anchor: "${p.title}")`}
+                    onClick={() => smartInsertUrl(p.url, p.title)}
+                  >
+                    <Link2 className="h-3 w-3 mr-1 shrink-0 text-violet-500" />
+                    <span className="truncate">{p.label}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* 3. Search Published Blogs */}
+            <div className="space-y-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Search Published Blogs
+              </span>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  value={linkSearchQuery}
+                  onChange={(e) => setLinkSearchQuery(e.target.value)}
+                  placeholder="Search blogs by title, slug, or keyword…"
+                  className="pl-8 pr-8 h-9 text-[12.5px] bg-background"
+                />
+                {linkSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setLinkSearchQuery("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 )}
               </div>
-            );
-          })()}
-
-          <Separator />
-
-          {/* 2. Quick Vinimay Pages (1-Click Insert) */}
-          <div className="space-y-1.5">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-              Quick Vinimay Pages
-            </span>
-            <div className="grid grid-cols-2 gap-1.5">
-              {[
-                {
-                  title: "Accounting Software Services",
-                  label: "Services",
-                  url: "/services",
-                },
-                {
-                  title: "Accounting Software Features",
-                  label: "Features",
-                  url: "/features",
-                },
-                {
-                  title: "Accounting Software Pricing",
-                  label: "Pricing",
-                  url: "/pricing",
-                },
-                {
-                  title: "Free Invoice Software for Small Business",
-                  label: "Free Invoice",
-                  url: "/free-invoice",
-                },
-                {
-                  title: "Vinimay Accounting Software",
-                  label: "About Us",
-                  url: "/about-us",
-                },
-                {
-                  title: "Free Accounting and Billing Software",
-                  label: "Home / Platform",
-                  url: "/",
-                },
-              ].map((p) => (
-                <Button
-                  key={p.url}
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-[11px] justify-start truncate"
-                  title={`Insert link to ${p.url} (Anchor: "${p.title}")`}
-                  onClick={() => smartInsertUrl(p.url, p.title)}
-                >
-                  <Link2 className="h-3 w-3 mr-1 shrink-0 text-violet-500" />
-                  <span className="truncate">{p.label}</span>
-                </Button>
-              ))}
             </div>
-          </div>
 
-          <Separator />
-
-          {/* 3. Search Published Blogs */}
-          <div className="space-y-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-              Search Published Blogs
-            </span>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-              <Input
-                value={linkSearchQuery}
-                onChange={(e) => setLinkSearchQuery(e.target.value)}
-                placeholder="Search blogs by title, slug, or keyword…"
-                className="pl-8 pr-8 h-9 text-[12.5px] bg-background"
-              />
-              {linkSearchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setLinkSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Search Results */}
-          {linkSearchQuery.trim() && (
-            <div className="space-y-2">
-              {searchResults.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground text-center py-3 border border-dashed border-border rounded-lg">
-                  No blogs found matching "{linkSearchQuery}"
-                </p>
-              ) : (
-                searchResults.map((b) => (
-                  <div
-                    key={b.id}
-                    className="rounded-xl border border-border p-3 space-y-1.5 hover:border-violet-200 transition-colors"
-                  >
-                    <p className="text-[12.5px] font-medium leading-snug line-clamp-2">
-                      {b.title}
-                    </p>
-                    <p className="text-[10.5px] text-muted-foreground truncate font-mono">
-                      /blogs/{b.slug}
-                      {b.seo?.focusKeyword && ` · ${b.seo.focusKeyword}`}
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-[11.5px] w-full"
-                      onClick={() => smartInsertLink(b)}
-                    >
-                      <Link2 className="h-3 w-3 mr-1" />
-                      Insert link
-                    </Button>
-                  </div>
-                ))
-              )}
-              <Separator />
-            </div>
-          )}
-
-          {/* AI-suggested links */}
-          {!linkSearchQuery.trim() && (
-            <>
-              {suggestions.length === 0 && (
-                <p className="text-[12.5px] text-muted-foreground rounded-lg border border-dashed border-border p-4 text-center">
-                  No more suggestions. Add a focus keyword to improve matching.
-                </p>
-              )}
-              {suggestions.map((s) => (
-                <div
-                  key={s.id}
-                  className="rounded-xl border border-border p-3 space-y-2 hover:border-violet-200 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-[13px] font-medium leading-snug">
-                      {s.title}
-                    </p>
-                    <Badge
-                      variant="outline"
-                      className={
-                        "shrink-0 text-[10.5px] " +
-                        (s.relevance >= 80
-                          ? "border-emerald-200 text-emerald-600 dark:border-emerald-900 dark:text-emerald-300"
-                          : "border-violet-200 text-violet-600 dark:border-violet-900 dark:text-violet-300")
-                      }
-                    >
-                      {s.relevance}% match
-                    </Badge>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground truncate">
-                    Anchor: "{s.title}" → {s.url}
+            {/* Search Results */}
+            {linkSearchQuery.trim() && (
+              <div className="space-y-2">
+                {searchResults.length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground text-center py-3 border border-dashed border-border rounded-lg">
+                    No blogs found matching "{linkSearchQuery}"
                   </p>
-                  <div className="flex gap-1.5">
+                ) : (
+                  searchResults.map((b) => (
+                    <div
+                      key={b.id}
+                      className="rounded-xl border border-border p-3 space-y-1.5 hover:border-violet-200 transition-colors"
+                    >
+                      <p className="text-[12.5px] font-medium leading-snug line-clamp-2">
+                        {b.title}
+                      </p>
+                      <p className="text-[10.5px] text-muted-foreground truncate font-mono">
+                        /blogs/{b.slug}
+                        {b.seo?.focusKeyword && ` · ${b.seo.focusKeyword}`}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11.5px] w-full"
+                        onClick={() => smartInsertLink(b)}
+                      >
+                        <Link2 className="h-3 w-3 mr-1" />
+                        Insert link
+                      </Button>
+                    </div>
+                  ))
+                )}
+                <Separator />
+              </div>
+            )}
+
+            {/* AI-suggested links */}
+            {!linkSearchQuery.trim() && (
+              <>
+                {suggestions.length === 0 && (
+                  <p className="text-[12.5px] text-muted-foreground rounded-lg border border-dashed border-border p-4 text-center">
+                    No more suggestions. Add a focus keyword to improve
+                    matching.
+                  </p>
+                )}
+                {suggestions.map((s) => (
+                  <div
+                    key={s.id}
+                    className="rounded-xl border border-border p-3 space-y-2 hover:border-violet-200 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[13px] font-medium leading-snug">
+                        {s.title}
+                      </p>
+                      <Badge
+                        variant="outline"
+                        className={
+                          "shrink-0 text-[10.5px] " +
+                          (s.relevance >= 80
+                            ? "border-emerald-200 text-emerald-600 dark:border-emerald-900 dark:text-emerald-300"
+                            : "border-violet-200 text-violet-600 dark:border-violet-900 dark:text-violet-300")
+                        }
+                      >
+                        {s.relevance}% match
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      Anchor: "{s.title}" → {s.url}
+                    </p>
+                    <div className="flex gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11.5px]"
+                        onClick={() => insertSuggestion(s)}
+                      >
+                        <Link2 className="h-3 w-3 mr-1" />
+                        Insert link
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-[11.5px] text-muted-foreground"
+                        onClick={() => dismissSuggestion(s)}
+                      >
+                        Ignore
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-[11.5px] text-muted-foreground"
+                        onClick={() => saveSuggestion(s)}
+                      >
+                        <BookmarkPlus className="h-3 w-3 mr-1" />
+                        Save for later
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {form.savedSuggestions.length > 0 && (
+              <>
+                <Separator />
+                <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Saved for later
+                </p>
+                {form.savedSuggestions.map((s, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
+                  >
+                    <span className="text-[12.5px] truncate">{s.title}</span>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="ghost"
                       className="h-7 text-[11.5px]"
                       onClick={() => insertSuggestion(s)}
                     >
-                      <Link2 className="h-3 w-3 mr-1" />
-                      Insert link
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-[11.5px] text-muted-foreground"
-                      onClick={() => dismissSuggestion(s)}
-                    >
-                      Ignore
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-[11.5px] text-muted-foreground"
-                      onClick={() => saveSuggestion(s)}
-                    >
-                      <BookmarkPlus className="h-3 w-3 mr-1" />
-                      Save for later
+                      Insert
                     </Button>
                   </div>
-                </div>
-              ))}
-            </>
-          )}
-
-          {form.savedSuggestions.length > 0 && (
-            <>
-              <Separator />
-              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Saved for later
-              </p>
-              {form.savedSuggestions.map((s, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
-                >
-                  <span className="text-[12.5px] truncate">{s.title}</span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-[11.5px]"
-                    onClick={() => insertSuggestion(s)}
-                  >
-                    Insert
-                  </Button>
-                </div>
-              ))}
-            </>
-          )}
-
-        </CardContent>
-      )}
-
-      {/* BRIEF TAB */}
-      {tab === "brief" && (
-        <CardContent className="p-4 space-y-3.5">
-          <div>
-            <p className="text-[13px] font-semibold">Content brief</p>
-            <p className="text-[11.5px] text-muted-foreground">
-              Define the strategy before writing, then generate a structure.
-            </p>
-          </div>
-          <Labeled label="Target keyword">
-            <Input
-              value={form.brief.targetKeyword}
-              onChange={(e) =>
-                up({ brief: { ...form.brief, targetKeyword: e.target.value } })
-              }
-              placeholder="e.g. technical SEO"
-            />
-          </Labeled>
-          <div className="grid grid-cols-2 gap-3">
-            <Labeled label="Search intent">
-              <Select
-                value={form.brief?.intent || "Informational"}
-                onValueChange={(v) =>
-                  up({ brief: { ...form.brief, intent: v } })
-                }
-              >
-                <SelectTrigger className="bg-muted/30">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[
-                    "Informational",
-                    "Commercial",
-                    "Transactional",
-                    "Navigational",
-                  ].map((i) => (
-                    <SelectItem key={i} value={i}>
-                      {i}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Labeled>
-            <Labeled label="Content type">
-              <Select
-                value={form.brief?.contentType || "Guide"}
-                onValueChange={(v) =>
-                  up({ brief: { ...form.brief, contentType: v } })
-                }
-              >
-                <SelectTrigger className="bg-muted/30">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[
-                    "Guide",
-                    "Listicle",
-                    "Tutorial",
-                    "Case Study",
-                    "Comparison",
-                  ].map((i) => (
-                    <SelectItem key={i} value={i}>
-                      {i}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Labeled>
-          </div>
-          <Labeled label="Target audience">
-            <Input
-              value={form.brief.audience}
-              onChange={(e) =>
-                up({ brief: { ...form.brief, audience: e.target.value } })
-              }
-              placeholder="e.g. Marketing teams, SEO specialists"
-            />
-          </Labeled>
-          <Labeled label="Suggested word count">
-            <Input
-              type="number"
-              value={form.brief.wordCount}
-              onChange={(e) =>
-                up({ brief: { ...form.brief, wordCount: +e.target.value } })
-              }
-            />
-          </Labeled>
-          <Labeled label="Questions to answer" hint="one per line">
-            <Textarea
-              rows={3}
-              value={form.brief.questions}
-              onChange={(e) =>
-                up({ brief: { ...form.brief, questions: e.target.value } })
-              }
-              placeholder="What is X?\nHow much does X cost?"
-            />
-          </Labeled>
-          <Labeled label="Required headings" hint="one per line">
-            <Textarea
-              rows={3}
-              value={form.brief.requiredHeadings}
-              onChange={(e) =>
-                up({
-                  brief: { ...form.brief, requiredHeadings: e.target.value },
-                })
-              }
-              placeholder={"What is technical SEO\nCommon mistakes"}
-            />
-          </Labeled>
-          <Button
-            className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
-            onClick={generateOutline}
-            disabled={outlineLoading}
-          >
-            {outlineLoading ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Wand2 className="h-4 w-4 mr-2" />
-            )}
-            Generate Content Structure
-          </Button>
-          {outline && (
-            <div className="rounded-xl border border-violet-200 dark:border-violet-900 bg-violet-50/50 dark:bg-violet-950/20 p-3.5 space-y-2.5">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-300">
-                Recommended structure
-              </p>
-              <p className="text-[13px] font-semibold leading-snug">
-                H1 · {outline.h1}
-              </p>
-              {outline.h2s.map((h, i) => (
-                <div key={i} className="pl-2">
-                  <p className="text-[12.5px] font-medium">H2 · {h.h2}</p>
-                  {h.h3s.map((h3, j) => (
-                    <p
-                      key={j}
-                      className="text-[12px] text-muted-foreground pl-3"
-                    >
-                      H3 · {h3}
-                    </p>
-                  ))}
-                </div>
-              ))}
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {outline.relatedKeywords.map((k) => (
-                  <Badge
-                    key={k}
-                    variant="outline"
-                    className="text-[10.5px] font-normal"
-                  >
-                    {k}
-                  </Badge>
                 ))}
-              </div>
-              <Button size="sm" className="w-full" onClick={applyOutline}>
-                Apply structure to editor
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      )}
+              </>
+            )}
+          </CardContent>
+        )}
 
-      {/* OUTLINE TAB */}
-      {tab === "outline" && (
-        <CardContent className="p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <ListTree className="h-4 w-4 text-violet-500" />
-            <p className="text-[13px] font-semibold">Table of contents</p>
-          </div>
-          {toc.length === 0 && (
-            <p className="text-[12.5px] text-muted-foreground rounded-lg border border-dashed border-border p-4 text-center">
-              Add H2 / H3 headings in your content to build the outline.
-            </p>
-          )}
-          {toc.map((t, i) => (
-            <button
-              key={i}
-              onClick={() => jumpTo(i)}
-              className={
-                "w-full text-left rounded-lg px-3 py-2 text-[12.5px] hover:bg-accent transition-colors flex items-center gap-2 " +
-                (t.level === 2 ? "" : "ml-4")
-              }
+        {/* BRIEF TAB */}
+        {tab === "brief" && (
+          <CardContent className="p-4 space-y-3.5">
+            <div>
+              <p className="text-[13px] font-semibold">Content brief</p>
+              <p className="text-[11.5px] text-muted-foreground">
+                Define the strategy before writing, then generate a structure.
+              </p>
+            </div>
+            <Labeled label="Target keyword">
+              <Input
+                value={form.brief.targetKeyword}
+                onChange={(e) =>
+                  up({
+                    brief: { ...form.brief, targetKeyword: e.target.value },
+                  })
+                }
+                placeholder="e.g. technical SEO"
+              />
+            </Labeled>
+            <div className="grid grid-cols-2 gap-3">
+              <Labeled label="Search intent">
+                <Select
+                  value={form.brief?.intent || "Informational"}
+                  onValueChange={(v) =>
+                    up({ brief: { ...form.brief, intent: v } })
+                  }
+                >
+                  <SelectTrigger className="bg-muted/30">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[
+                      "Informational",
+                      "Commercial",
+                      "Transactional",
+                      "Navigational",
+                    ].map((i) => (
+                      <SelectItem key={i} value={i}>
+                        {i}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Labeled>
+              <Labeled label="Content type">
+                <Select
+                  value={form.brief?.contentType || "Guide"}
+                  onValueChange={(v) =>
+                    up({ brief: { ...form.brief, contentType: v } })
+                  }
+                >
+                  <SelectTrigger className="bg-muted/30">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[
+                      "Guide",
+                      "Listicle",
+                      "Tutorial",
+                      "Case Study",
+                      "Comparison",
+                    ].map((i) => (
+                      <SelectItem key={i} value={i}>
+                        {i}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Labeled>
+            </div>
+            <Labeled label="Target audience">
+              <Input
+                value={form.brief.audience}
+                onChange={(e) =>
+                  up({ brief: { ...form.brief, audience: e.target.value } })
+                }
+                placeholder="e.g. Marketing teams, SEO specialists"
+              />
+            </Labeled>
+            <Labeled label="Suggested word count">
+              <Input
+                type="number"
+                value={form.brief.wordCount}
+                onChange={(e) =>
+                  up({ brief: { ...form.brief, wordCount: +e.target.value } })
+                }
+              />
+            </Labeled>
+            <Labeled label="Questions to answer" hint="one per line">
+              <Textarea
+                rows={3}
+                value={form.brief.questions}
+                onChange={(e) =>
+                  up({ brief: { ...form.brief, questions: e.target.value } })
+                }
+                placeholder="What is X?\nHow much does X cost?"
+              />
+            </Labeled>
+            <Labeled label="Required headings" hint="one per line">
+              <Textarea
+                rows={3}
+                value={form.brief.requiredHeadings}
+                onChange={(e) =>
+                  up({
+                    brief: { ...form.brief, requiredHeadings: e.target.value },
+                  })
+                }
+                placeholder={"What is technical SEO\nCommon mistakes"}
+              />
+            </Labeled>
+            <Button
+              className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
+              onClick={generateOutline}
+              disabled={outlineLoading}
             >
-              <ChevronRight className="h-3 w-3 text-muted-foreground" />
-              <span className="truncate">{t.text}</span>
-            </button>
-          ))}
-        </CardContent>
-      )}
+              {outlineLoading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Wand2 className="h-4 w-4 mr-2" />
+              )}
+              Generate Content Structure
+            </Button>
+            {outline && (
+              <div className="rounded-xl border border-violet-200 dark:border-violet-900 bg-violet-50/50 dark:bg-violet-950/20 p-3.5 space-y-2.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-300">
+                  Recommended structure
+                </p>
+                <p className="text-[13px] font-semibold leading-snug">
+                  H1 · {outline.h1}
+                </p>
+                {outline.h2s.map((h, i) => (
+                  <div key={i} className="pl-2">
+                    <p className="text-[12.5px] font-medium">H2 · {h.h2}</p>
+                    {h.h3s.map((h3, j) => (
+                      <p
+                        key={j}
+                        className="text-[12px] text-muted-foreground pl-3"
+                      >
+                        H3 · {h3}
+                      </p>
+                    ))}
+                  </div>
+                ))}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {outline.relatedKeywords.map((k) => (
+                    <Badge
+                      key={k}
+                      variant="outline"
+                      className="text-[10.5px] font-normal"
+                    >
+                      {k}
+                    </Badge>
+                  ))}
+                </div>
+                <Button size="sm" className="w-full" onClick={applyOutline}>
+                  Apply structure to editor
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        )}
+
+        {/* OUTLINE TAB */}
+        {tab === "outline" && (
+          <CardContent className="p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <ListTree className="h-4 w-4 text-violet-500" />
+              <p className="text-[13px] font-semibold">Table of contents</p>
+            </div>
+            {toc.length === 0 && (
+              <p className="text-[12.5px] text-muted-foreground rounded-lg border border-dashed border-border p-4 text-center">
+                Add H2 / H3 headings in your content to build the outline.
+              </p>
+            )}
+            {toc.map((t, i) => (
+              <button
+                key={i}
+                onClick={() => jumpTo(i)}
+                className={
+                  "w-full text-left rounded-lg px-3 py-2 text-[12.5px] hover:bg-accent transition-colors flex items-center gap-2 " +
+                  (t.level === 2 ? "" : "ml-4")
+                }
+              >
+                <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                <span className="truncate">{t.text}</span>
+              </button>
+            ))}
+          </CardContent>
+        )}
       </div>
     </Card>
   );
@@ -5777,6 +6143,17 @@ function PreviewModal({ open, onOpenChange, form, analysis }) {
                       __html:
                         form.contentHtml ||
                         "<p>Start writing in the editor to see the preview…</p>",
+                    }}
+                    onClick={(e) => {
+                      const a = e.target.closest("a");
+                      if (!a) return;
+                      const href = a.getAttribute("href");
+                      if (!href) return;
+                      e.preventDefault();
+                      const targetUrl = href.startsWith("http")
+                        ? href
+                        : getVinimayUrl(href);
+                      window.open(targetUrl, "_blank", "noopener,noreferrer");
                     }}
                   />
                 </div>

@@ -108,6 +108,21 @@ export default function Blogs({ statusFilter, navigate, can }) {
     keepPreviousData: true,
   });
   const { data: team } = useSWR("/api/team", fetcher);
+  const { data: contentOptions } = useSWR("/api/content-options", fetcher);
+
+  const categoriesList = useMemo(() => {
+    const set = new Set();
+    (contentOptions?.categories || []).forEach((c) => {
+      if (c && c.trim()) set.add(c.trim());
+    });
+    (data?.categories || []).forEach((c) => {
+      if (c && c.trim()) set.add(c.trim());
+    });
+    (data?.items || []).forEach((b) => {
+      if (b.category && b.category.trim()) set.add(b.category.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [contentOptions?.categories, data?.categories, data?.items]);
 
   const [savedCounts, setSavedCounts] = useState({});
   useEffect(() => {
@@ -430,16 +445,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All categories</SelectItem>
-                  {[
-                    "SEO Fundamentals",
-                    "Technical SEO",
-                    "Content Marketing",
-                    "Link Building",
-                    "Local SEO",
-                    "Keyword Research",
-                    "Analytics & Reporting",
-                    "Digital Marketing",
-                  ].map((c) => (
+                  {categoriesList.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>
