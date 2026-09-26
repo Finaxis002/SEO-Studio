@@ -2,8 +2,19 @@
 
 import { useEffect, useState } from "react";
 import useSWR from "swr";
-import { toast } from "sonner";
-import { Pencil, Save, Sun, Trash2 } from "lucide-react";
+import {
+  Pencil,
+  Save,
+  Sun,
+  Trash2,
+  Plus,
+  Bot,
+  Globe,
+  Sparkles,
+  ExternalLink,
+  ShieldCheck,
+  RefreshCw,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +48,8 @@ export default function SettingsView({
   user,
   canManageSettings = true,
 }) {
+  const vinimayUrl =
+    process.env.NEXT_PUBLIC_VINIMAY_URL || "https://vinimay.sharda.co.in";
   const [tab, setTab] = useState(
     canManageSettings ? initialTab || "general" : "profile",
   );
@@ -53,7 +66,9 @@ export default function SettingsView({
     fetcher,
   );
   const [form, setForm] = useState(
-    canManageSettings ? null : { general: {}, seo: {}, publishing: {} },
+    canManageSettings
+      ? null
+      : { general: {}, seo: {}, llm: {}, publishing: {} },
   );
   const [newCategory, setNewCategory] = useState("");
   const [newSubcategory, setNewSubcategory] = useState("");
@@ -62,6 +77,9 @@ export default function SettingsView({
   const [editingSubcategory, setEditingSubcategory] = useState(null);
   const [addCategoryOpen, setAddCategoryOpen] = useState(false);
   const [addSubcategoryOpen, setAddSubcategoryOpen] = useState(false);
+  const [addBotOpen, setAddBotOpen] = useState(false);
+  const [newBotName, setNewBotName] = useState("");
+  const [newBotAgent, setNewBotAgent] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const { theme, setTheme } = useTheme();
 
@@ -73,6 +91,7 @@ export default function SettingsView({
       setForm({
         general: s.general || {},
         seo: s.seo || {},
+        llm: s.llm || { enabled: true, includeBlogs: true, summary: "" },
         publishing: s.publishing || {},
       });
   }, [s, canManageSettings]); // eslint-disable-line
@@ -98,8 +117,82 @@ export default function SettingsView({
   const upG = (k, v) =>
     setForm({ ...form, general: { ...form.general, [k]: v } });
   const upS = (k, v) => setForm({ ...form, seo: { ...form.seo, [k]: v } });
+  const upL = (k, v) =>
+    setForm({ ...form, llm: { ...(form.llm || {}), [k]: v } });
   const upP = (k, v) =>
     setForm({ ...form, publishing: { ...form.publishing, [k]: v } });
+
+  const aiCrawlers = form?.seo?.aiCrawlers || [];
+
+  const toggleCrawler = (id) => {
+    const updated = aiCrawlers.map((c) =>
+      c.id === id ? { ...c, allowed: !c.allowed } : c,
+    );
+    upS("aiCrawlers", updated);
+  };
+
+  const deleteCrawler = (id) => {
+    const updated = aiCrawlers.filter((c) => c.id !== id);
+    upS("aiCrawlers", updated);
+    toast.success("AI Crawler removed");
+  };
+
+  const addCrawler = () => {
+    if (!newBotAgent.trim()) {
+      toast.error("User-Agent is required");
+      return;
+    }
+    const newBot = {
+      id: "bot-" + Date.now(),
+      name: newBotName.trim() || newBotAgent.trim(),
+      userAgent: newBotAgent.trim(),
+      allowed: true,
+    };
+    const updated = [...aiCrawlers, newBot];
+    upS("aiCrawlers", updated);
+    setNewBotName("");
+    setNewBotAgent("");
+    setAddBotOpen(false);
+    toast.success("AI Crawler added");
+  };
+
+  const generateRobotsTemplate = () => {
+    const lines = [
+      "User-agent: *",
+      "Allow: /",
+      "",
+      "# Block private, auth & internal search pages",
+      "Disallow: /login",
+      "Disallow: /signup",
+      "Disallow: /dashboard",
+      "Disallow: /admin",
+      "Disallow: /api",
+      "Disallow: /?s=",
+      "Disallow: /*?s=",
+      "Disallow: /search/",
+      "",
+      "# Explicitly allow major AI crawlers",
+      "",
+    ];
+
+    const crawlers = form?.seo?.aiCrawlers || [];
+
+    // Group crawlers if possible or list them cleanly
+    crawlers.forEach((c) => {
+      lines.push(`User-agent: ${c.userAgent}`);
+      lines.push(c.allowed ? "Allow: /" : "Disallow: /");
+      lines.push("");
+    });
+
+    lines.push("# Sitemap");
+    lines.push("Sitemap: https://vinimay.sharda.co.in/sitemap.xml");
+    lines.push("");
+    lines.push("# AI-readable website files");
+    lines.push("# https://vinimay.sharda.co.in/llms.txt");
+
+    upS("robotsTxt", lines.join("\n"));
+    toast.success("Robots.txt compiled from AI crawlers and rules");
+  };
 
   const addCategory = async () => {
     if (!newCategory.trim()) return;
@@ -268,6 +361,38 @@ export default function SettingsView({
               Cancel
             </Button>
             <Button onClick={addSubcategory}>Add subcategory</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addBotOpen} onOpenChange={setAddBotOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add AI Crawler</DialogTitle>
+            <DialogDescription>
+              Add a bot by its User-Agent string. Toggle Allow/Block after
+              adding.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              autoFocus
+              value={newBotName}
+              onChange={(e) => setNewBotName(e.target.value)}
+              placeholder="Display name (e.g. GPTBot)"
+            />
+            <Input
+              value={newBotAgent}
+              onChange={(e) => setNewBotAgent(e.target.value)}
+              placeholder="User-Agent (e.g. GPTBot)"
+              onKeyDown={(e) => e.key === "Enter" && addCrawler()}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddBotOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={addCrawler}>Add Crawler</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -451,73 +576,251 @@ export default function SettingsView({
 
       {tab === "seo" && (
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] gap-4 items-start">
-          <Card className="card-hover">
-            <CardContent className="p-5 space-y-4">
-              <Labeled
-                label="Default meta title template"
-                hint="use {title} placeholder"
-              >
-                <Input
-                  value={form.seo.defaultMetaTitle || ""}
-                  onChange={(e) => upS("defaultMetaTitle", e.target.value)}
-                  placeholder="{title} — SEO Studio"
-                />
-              </Labeled>
-              <Labeled label="Default meta description">
-                <Textarea
-                  rows={2}
-                  value={form.seo.defaultMetaDescription || ""}
-                  onChange={(e) =>
-                    upS("defaultMetaDescription", e.target.value)
-                  }
-                />
-              </Labeled>
-              <div className="space-y-3">
+          <div className="space-y-4">
+            {/* Meta defaults */}
+            <Card className="card-hover">
+              <CardContent className="p-5 space-y-4">
+                <Labeled
+                  label="Default meta title template"
+                  hint="use {title} placeholder"
+                >
+                  <Input
+                    value={form.seo.defaultMetaTitle || ""}
+                    onChange={(e) => upS("defaultMetaTitle", e.target.value)}
+                    placeholder="{title} — SEO Studio"
+                  />
+                </Labeled>
+                <Labeled label="Default meta description">
+                  <Textarea
+                    rows={2}
+                    value={form.seo.defaultMetaDescription || ""}
+                    onChange={(e) =>
+                      upS("defaultMetaDescription", e.target.value)
+                    }
+                  />
+                </Labeled>
+                <Button
+                  onClick={() => save("SEO")}
+                  className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
+                >
+                  <Save className="h-4 w-4 mr-1.5" />
+                  Save changes
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Section 1: Robots.txt & AI Crawlers */}
+            <Card className="card-hover">
+              <CardContent className="p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-violet-500" />
+                    <p className="text-[14px] font-semibold">
+                      Robots.txt &amp; AI Crawlers
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setAddBotOpen(true)}
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Add AI Bot
+                  </Button>
+                </div>
+                <div className="space-y-1.5">
+                  {aiCrawlers.length === 0 && (
+                    <p className="text-[12px] text-muted-foreground text-center py-3">
+                      No AI crawlers configured. Click &ldquo;Add AI Bot&rdquo;
+                      to add one.
+                    </p>
+                  )}
+                  {aiCrawlers.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center gap-3 rounded-lg border px-3 py-2"
+                    >
+                      <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12.5px] font-medium truncate">
+                          {c.name}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground font-mono">
+                          {c.userAgent}
+                        </p>
+                      </div>
+                      <Badge
+                        variant={c.allowed ? "default" : "destructive"}
+                        className="text-[10px]"
+                      >
+                        {c.allowed ? "Allow" : "Block"}
+                      </Badge>
+                      <Switch
+                        checked={!!c.allowed}
+                        onCheckedChange={() => toggleCrawler(c.id)}
+                      />
+                      <button type="button" onClick={() => deleteCrawler(c.id)}>
+                        <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[12.5px] font-medium">
+                      robots.txt
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={generateRobotsTemplate}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" /> Compile from rules
+                    </Button>
+                  </div>
+                  <Textarea
+                    rows={7}
+                    value={form.seo.robotsTxt || ""}
+                    onChange={(e) => upS("robotsTxt", e.target.value)}
+                    className="font-mono text-[11.5px]"
+                  />
+                  <a
+                    href={`${vinimayUrl}/robots.txt`}
+                    target="_blank"
+                    className="text-[11px] text-violet-500 flex items-center gap-1 hover:underline"
+                  >
+                    <ExternalLink className="h-3 w-3" /> Preview live robots.txt
+                  </a>
+                </div>
+                <Button
+                  onClick={() => save("SEO")}
+                  className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
+                >
+                  <Save className="h-4 w-4 mr-1.5" />
+                  Save changes
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Section 2: Sitemap / Search Indexing */}
+            <Card className="card-hover">
+              <CardContent className="p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-emerald-500" />
+                  <p className="text-[14px] font-semibold">
+                    Search Engine Indexing (Sitemap)
+                  </p>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+                    <div>
+                      <p className="text-[13px] font-medium">XML Sitemap</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Include published blogs in sitemap.xml (filters out
+                        noindex blogs automatically)
+                      </p>
+                    </div>
+                    <Switch
+                      checked={!!form.seo.sitemapEnabled}
+                      onCheckedChange={(v) => upS("sitemapEnabled", v)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+                    <div>
+                      <p className="text-[13px] font-medium">
+                        Google Search Console verified
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {form.seo.gscProperty ||
+                          "Connected via Google Service Account"}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={!!form.seo.gscVerified}
+                      onCheckedChange={(v) => upS("gscVerified", v)}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 pt-1">
+                  <a
+                    href={`${vinimayUrl}/sitemap.xml`}
+                    target="_blank"
+                    className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 hover:underline"
+                  >
+                    <ExternalLink className="h-3 w-3" /> Preview live
+                    sitemap.xml
+                  </a>
+                </div>
+                <Button
+                  onClick={() => save("SEO")}
+                  className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
+                >
+                  <Save className="h-4 w-4 mr-1.5" />
+                  Save changes
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Section 3: LLMs.txt / GEO */}
+            <Card className="card-hover">
+              <CardContent className="p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-amber-500" />
+                  <p className="text-[14px] font-semibold">
+                    Generative Engine Optimization (LLMs.txt)
+                  </p>
+                </div>
                 <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
                   <div>
-                    <p className="text-[13px] font-medium">XML sitemap</p>
+                    <p className="text-[13px] font-medium">Enable llms.txt</p>
                     <p className="text-[11px] text-muted-foreground">
-                      Automatically include blogs in sitemap.xml
+                      Serve AI-readable knowledge file for ChatGPT, Claude,
+                      Perplexity, Gemini
                     </p>
                   </div>
                   <Switch
-                    checked={!!form.seo.sitemapEnabled}
-                    onCheckedChange={(v) => upS("sitemapEnabled", v)}
+                    checked={!!(form.llm?.enabled !== false)}
+                    onCheckedChange={(v) => upL("enabled", v)}
                   />
                 </div>
                 <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
                   <div>
                     <p className="text-[13px] font-medium">
-                      Google Search Console verified
+                      Auto-include published blogs
                     </p>
                     <p className="text-[11px] text-muted-foreground">
-                      {form.seo.gscProperty ||
-                        "Connected via Google Service Account"}
+                      Noindex blogs are automatically excluded from llms.txt
                     </p>
                   </div>
                   <Switch
-                    checked={!!form.seo.gscVerified}
-                    onCheckedChange={(v) => upS("gscVerified", v)}
+                    checked={!!(form.llm?.includeBlogs !== false)}
+                    onCheckedChange={(v) => upL("includeBlogs", v)}
                   />
                 </div>
-              </div>
-              <Labeled label="robots.txt">
-                <Textarea
-                  rows={4}
-                  value={form.seo.robotsTxt || ""}
-                  onChange={(e) => upS("robotsTxt", e.target.value)}
-                  className="font-mono text-[12.5px]"
-                />
-              </Labeled>
-              <Button
-                onClick={() => save("SEO")}
-                className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
-              >
-                <Save className="h-4 w-4 mr-1.5" />
-                Save changes
-              </Button>
-            </CardContent>
-          </Card>
+                <Labeled label="Site summary for AI (shown at top of llms.txt)">
+                  <Textarea
+                    rows={3}
+                    value={form.llm?.summary || ""}
+                    onChange={(e) => upL("summary", e.target.value)}
+                    placeholder="Describe your business for AI models..."
+                  />
+                </Labeled>
+                <a
+                  href={`${vinimayUrl}/llms.txt`}
+                  target="_blank"
+                  className="text-[11px] text-amber-600 flex items-center gap-1 hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" /> Preview live llms.txt
+                </a>
+                <Button
+                  onClick={() => save("LLMs")}
+                  className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
+                >
+                  <Save className="h-4 w-4 mr-1.5" />
+                  Save changes
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
           <Card className="card-hover">
             <CardContent className="p-5 space-y-3">
               <div>
