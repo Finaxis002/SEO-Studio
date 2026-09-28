@@ -26,11 +26,21 @@ import {
   verifyPassword,
 } from "../../../lib/auth";
 
-function handleCORS(response) {
-  response.headers.set(
-    "Access-Control-Allow-Origin",
-    process.env.CORS_ORIGINS || "*",
-  );
+function handleCORS(response, request) {
+  const origin = request?.headers?.get("origin");
+  if (
+    origin &&
+    (origin.includes("sharda.co.in") ||
+      origin.includes("localhost") ||
+      origin.includes("127.0.0.1"))
+  ) {
+    response.headers.set("Access-Control-Allow-Origin", origin);
+  } else {
+    response.headers.set(
+      "Access-Control-Allow-Origin",
+      process.env.CORS_ORIGINS || "*",
+    );
+  }
   response.headers.set(
     "Access-Control-Allow-Methods",
     "GET, POST, PUT, DELETE, OPTIONS",
@@ -43,8 +53,8 @@ function handleCORS(response) {
   return response;
 }
 
-export async function OPTIONS() {
-  return handleCORS(new NextResponse(null, { status: 200 }));
+export async function OPTIONS(request) {
+  return handleCORS(new NextResponse(null, { status: 200 }), request);
 }
 
 function esc(s) {
@@ -236,7 +246,7 @@ function newBlogDoc(body, user) {
     id: uuidv4(),
     title,
     slug: body.slug || slugify(title),
-    category: body.category || "",
+    category: (body.category || "").trim() || "General",
     subcategory: body.subcategory || "",
     tags:
       body.tags && body.tags.length > 0
@@ -522,11 +532,17 @@ async function handleRoute(request, { params }) {
           status: member.status,
         }),
       });
+      const host = request.headers.get("host") || "";
+      const isSharda = host.includes("sharda.co.in");
       response.headers.set(
         "Set-Cookie",
-        sessionCookie(createSession(member.id)),
+        sessionCookie(createSession(member.id), isSharda),
       );
-      return handleCORS(response);
+      response.headers.append(
+        "Set-Cookie",
+        `seo_logged_in=1; Path=/; SameSite=Lax; Max-Age=${7 * 86400}${isSharda ? "; Domain=.sharda.co.in" : ""}`,
+      );
+      return handleCORS(response, request);
     } catch (error) {
       console.error("Login error:", error);
       return handleCORS(
@@ -538,14 +554,21 @@ async function handleRoute(request, { params }) {
           },
           { status: 500 },
         ),
+        request,
       );
     }
   }
 
   if (route === "/auth/logout" && method === "POST") {
+    const host = request.headers.get("host") || "";
+    const isSharda = host.includes("sharda.co.in");
     const response = NextResponse.json({ ok: true });
-    response.headers.set("Set-Cookie", clearSessionCookie());
-    return handleCORS(response);
+    response.headers.set("Set-Cookie", clearSessionCookie(isSharda));
+    response.headers.append(
+      "Set-Cookie",
+      `seo_logged_in=; Path=/; SameSite=Lax; Max-Age=0${isSharda ? "; Domain=.sharda.co.in" : ""}`,
+    );
+    return handleCORS(response, request);
   }
 
   if (route === "/auth/me" && method === "GET") {
@@ -559,23 +582,29 @@ async function handleRoute(request, { params }) {
           { user: null, authenticated: false },
           { status: 200 },
         ),
+        request,
       );
     const roleDoc = member.role
       ? await db.collection("roles").findOne({ name: member.role })
       : null;
-    return handleCORS(
-      NextResponse.json({
-        authenticated: true,
-        user: clean({
-          id: member.id,
-          name: member.name,
-          email: member.email,
-          role: member.role,
-          status: member.status,
-          permissions: roleDoc?.permissions || [],
-        }),
+    const host = request.headers.get("host") || "";
+    const isSharda = host.includes("sharda.co.in");
+    const meResponse = NextResponse.json({
+      authenticated: true,
+      user: clean({
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        role: member.role,
+        status: member.status,
+        permissions: roleDoc?.permissions || [],
       }),
+    });
+    meResponse.headers.set(
+      "Set-Cookie",
+      `seo_logged_in=1; Path=/; SameSite=Lax; Max-Age=${7 * 86400}${isSharda ? "; Domain=.sharda.co.in" : ""}`,
     );
+    return handleCORS(meResponse, request);
   }
 
   if (route === "/health" && method === "GET") {
@@ -1365,7 +1394,9 @@ async function handleRoute(request, { params }) {
             page,
             pages: Math.ceil(total / limit) || 1,
             counts,
-            categories: allCategories.filter(Boolean).sort(),
+            categories: Array.from(
+              new Set(["General", ...allCategories.filter(Boolean)]),
+            ).sort(),
           }),
         ),
       );
@@ -1487,6 +1518,26 @@ async function handleRoute(request, { params }) {
             { status: 400 },
           ),
         );
+      // Hard-gate mandatory fields for both publishing and scheduling
+      // Hard-gate mandatory fields for both publishing and scheduling
+      if (to === "published" || to === "scheduled") {
+        const mandatoryMissing = [];
+        if (!(blog.title || "").trim()) mandatoryMissing.push("Blog title");
+        if (!blog.author) mandatoryMissing.push("Author");
+        if (!blog.featuredImage?.url) mandatoryMissing.push("Featured image");
+
+        if (mandatoryMissing.length > 0) {
+          return handleCORS(
+            NextResponse.json(
+              {
+                error: `Cannot ${to === "scheduled" ? "schedule" : "publish"}: Mandatory fields missing (${mandatoryMissing.join(", ")}). Please complete these in the editor first.`,
+              },
+              { status: 400 },
+            ),
+          );
+        }
+      }
+
       if (to === "published" && publishing.checklistEnabled) {
         const missing = [];
         if (!(blog.seo?.metaTitle || blog.title))
@@ -1498,7 +1549,6 @@ async function handleRoute(request, { params }) {
         if (!(blog.featuredImage?.alt || "").trim())
           missing.push("Featured image alt text");
         if (!blog.author) missing.push("Author");
-        if (!blog.category) missing.push("Category");
 
         if (missing.length > 0)
           return handleCORS(
@@ -1513,6 +1563,9 @@ async function handleRoute(request, { params }) {
           );
       }
       const update = { status: to, updatedAt: new Date().toISOString() };
+      if (!blog.category) {
+        update.category = "General";
+      }
       if (to === "published" && !blog.publishedAt) {
         update.publishedAt = new Date().toISOString();
       }
@@ -1671,6 +1724,9 @@ async function handleRoute(request, { params }) {
         fields.forEach((f) => {
           if (body[f] !== undefined) update[f] = body[f];
         });
+        if (body.category !== undefined) {
+          update.category = (body.category || "").trim() || "General";
+        }
         if (update.contentHtml !== undefined) {
           update.contentHtml = normalizeHtmlContent(update.contentHtml);
         }
@@ -2533,20 +2589,21 @@ async function handleRoute(request, { params }) {
           },
         },
       );
-      return handleCORS(
-        NextResponse.json(
-          clean(options || { categories: [], subcategories: [] }),
-        ),
-      );
+      const cleaned = clean(options || { categories: [], subcategories: [] });
+      if (!cleaned.categories) cleaned.categories = [];
+      if (!cleaned.categories.includes("General")) {
+        cleaned.categories.unshift("General");
+      }
+      return handleCORS(NextResponse.json(cleaned));
     }
 
     if (route === "/categories" && method === "GET") {
       const options = await db
         .collection("workspace_config")
         .findOne({ id: "default" }, { projection: { categories: 1 } });
-      return handleCORS(
-        NextResponse.json({ categories: options?.categories || [] }),
-      );
+      const cats = options?.categories ? [...options.categories] : [];
+      if (!cats.includes("General")) cats.unshift("General");
+      return handleCORS(NextResponse.json({ categories: cats }));
     }
 
     if (route === "/categories" && method === "POST") {
@@ -2595,6 +2652,17 @@ async function handleRoute(request, { params }) {
           NextResponse.json({ error: "Category not found" }, { status: 404 }),
         );
       if (method === "DELETE") {
+        if (oldName.toLowerCase() === "general") {
+          return handleCORS(
+            NextResponse.json(
+              {
+                error:
+                  "The default 'General' category is protected and cannot be deleted.",
+              },
+              { status: 400 },
+            ),
+          );
+        }
         await db.collection("workspace_config").updateOne(
           { id: "default" },
           {
@@ -2604,13 +2672,16 @@ async function handleRoute(request, { params }) {
             },
           },
         );
+        // Automatically reassign all blogs in the deleted category to "General"
         await db
           .collection("blogs")
           .updateMany(
             { category: oldName },
-            { $set: { category: "", subcategory: "" } },
+            { $set: { category: "General", subcategory: "" } },
           );
-        return handleCORS(NextResponse.json({ ok: true }));
+        return handleCORS(
+          NextResponse.json({ ok: true, reassignedTo: "General" }),
+        );
       }
       const newName = String(body.newName || "").trim();
       if (!newName)

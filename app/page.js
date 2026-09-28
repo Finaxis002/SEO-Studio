@@ -393,6 +393,7 @@ export default function App() {
         navigate={navigate}
         can={can}
         user={user}
+        setUser={setUser}
         focus={view.params?.focus}
         key={(view.params?.id || "new") + (view.params?.focus || "")}
       />

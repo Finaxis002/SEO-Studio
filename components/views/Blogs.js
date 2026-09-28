@@ -62,6 +62,7 @@ import {
   RequestChangesDialog,
   ScheduleDialog,
   Pagination,
+  SearchableSelect,
 } from "../bits";
 
 const TABS = [
@@ -112,7 +113,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
   const { data: contentOptions } = useSWR("/api/content-options", fetcher);
 
   const categoriesList = useMemo(() => {
-    const set = new Set();
+    const set = new Set(["General"]);
     (contentOptions?.categories || []).forEach((c) => {
       if (c && c.trim()) set.add(c.trim());
     });
@@ -210,6 +211,20 @@ export default function Blogs({ statusFilter, navigate, can }) {
             b.status === "published") &&
           can("blogs.schedule"),
         onClick: () => {
+          const missing = [];
+          if (!(b.title || "").trim()) missing.push("Title");
+          if (!b.author) missing.push("Author");
+          if (!b.featuredImage?.url) missing.push("Featured image");
+
+          if (missing.length > 0) {
+            toast.error(
+              `Cannot schedule: Missing mandatory field${missing.length > 1 ? "s" : ""} (${missing.join(", ")}). Opening editor...`,
+              { duration: 4500 },
+            );
+            navigate("editor", { id: b.id });
+            return;
+          }
+
           if (b.status === "draft" || b.status === "in_review") {
             const score = b.seo?.score || 0;
             setConfirmDialog({
@@ -234,6 +249,20 @@ export default function Blogs({ statusFilter, navigate, can }) {
             b.status === "scheduled") &&
           can("blogs.publish"),
         onClick: () => {
+          const missing = [];
+          if (!(b.title || "").trim()) missing.push("Title");
+          if (!b.author) missing.push("Author");
+          if (!b.featuredImage?.url) missing.push("Featured image");
+
+          if (missing.length > 0) {
+            toast.error(
+              `Cannot publish directly: Missing mandatory field${missing.length > 1 ? "s" : ""} (${missing.join(", ")}). Opening editor...`,
+              { duration: 4500 },
+            );
+            navigate("editor", { id: b.id });
+            return;
+          }
+
           const doPublish = () =>
             api("/blogs/" + b.id + "/transition", {
               method: "POST",
@@ -434,25 +463,20 @@ export default function Blogs({ statusFilter, navigate, can }) {
                   ))}
                 </SelectContent>
               </Select>
-              <Select
-                value={category}
-                onValueChange={(v) => {
-                  setCategory(v);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-[150px] h-9 bg-muted/40">
-                  <SelectValue placeholder="Category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
-                  {categoriesList.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="w-[160px] sm:w-[175px]">
+                <SearchableSelect
+                  value={category === "all" ? "All categories" : category}
+                  placeholder="All categories"
+                  searchPlaceholder="Search category..."
+                  options={["All categories", ...categoriesList]}
+                  onChange={(v) => {
+                    setCategory(v === "All categories" ? "all" : v);
+                    setPage(1);
+                  }}
+                  className="bg-muted/40 h-9 text-xs sm:text-sm font-normal"
+                  emptyText="No categories found"
+                />
+              </div>
               <Select
                 value={band}
                 onValueChange={(v) => {
