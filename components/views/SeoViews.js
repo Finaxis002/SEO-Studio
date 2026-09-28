@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import useSWR from 'swr'
 import { AlertTriangle, CheckCircle2, Gauge, ShieldAlert, Wand2, ArrowRight, FileText, XCircle, Sparkles } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -85,7 +86,14 @@ export function SeoOverview({ navigate }) {
 
 // ---------------- SEO ISSUES ----------------
 export function SeoIssues({ navigate }) {
-  const { data, error } = useSWR('/api/seo-issues', fetcher)
+  const { data, error, mutate } = useSWR('/api/seo-issues', fetcher)
+
+  useEffect(() => {
+    const handleRefresh = () => mutate()
+    window.addEventListener('ss-refresh', handleRefresh)
+    return () => window.removeEventListener('ss-refresh', handleRefresh)
+  }, [mutate])
+
   if (error) return <EmptyState title="Something went wrong" onRetry={() => location.reload()} />
   if (!data) return <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}</div>
 

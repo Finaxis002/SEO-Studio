@@ -518,9 +518,9 @@ export default function SettingsView({
         }
         description={
           deleteTarget
-            ? 'Delete "' +
-              deleteTarget.name +
-              '"? Existing blogs will lose this value.'
+            ? deleteTarget.type === "category"
+              ? `Delete "${deleteTarget.name}"? All existing blogs in this category will automatically be moved to "General".`
+              : `Delete "${deleteTarget.name}"? Existing blogs will lose this subcategory.`
             : "This item will be removed."
         }
         onConfirm={() =>
@@ -944,34 +944,42 @@ export default function SettingsView({
                           </span>
                         </div>
                         <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 transition-opacity">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                            onClick={() =>
-                              setEditingCategory({
-                                oldName: category,
-                                name: category,
-                              })
-                            }
-                            title="Rename category"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                            onClick={() =>
-                              setDeleteTarget({
-                                type: "category",
-                                name: category,
-                              })
-                            }
-                            title="Delete category"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
+                          {category.toLowerCase() === "general" ? (
+                            <span className="text-[10px] font-medium tracking-wide uppercase px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300">
+                              Default
+                            </span>
+                          ) : (
+                            <>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                onClick={() =>
+                                  setEditingCategory({
+                                    oldName: category,
+                                    name: category,
+                                  })
+                                }
+                                title="Rename category"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6 text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    type: "category",
+                                    name: category,
+                                  })
+                                }
+                                title="Delete category"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </div>
                     ))

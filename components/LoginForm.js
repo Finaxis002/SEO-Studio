@@ -9,7 +9,9 @@ import {
   Sparkles,
   Eye,
   EyeOff,
+  AlertCircle,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,11 +71,11 @@ export default function LoginForm({ onSuccess }) {
 
       onSuccess(data.user);
     } catch (requestError) {
-      setError(
+      const msg =
         requestError instanceof Error
           ? requestError.message
-          : "Login failed"
-      );
+          : "Login failed";
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -263,20 +265,22 @@ export default function LoginForm({ onSuccess }) {
                         }
                       }}
                       placeholder="you@company.com"
-                      className="
+                      className={`
                         h-11
-
-                        border-slate-200
                         bg-white/80
-
                         pl-10
-
                         text-slate-800
                         placeholder:text-slate-400
-
                         focus:border-[#30276f]
                         focus:ring-[#30276f]/20
-                      "
+                        ${
+                          error &&
+                          (error.toLowerCase().includes("email") ||
+                            error.toLowerCase().includes("account"))
+                            ? "border-rose-300 ring-1 ring-rose-200 bg-rose-50/15"
+                            : "border-slate-200"
+                        }
+                      `}
                     />
                   </div>
                 </div>
@@ -326,21 +330,23 @@ export default function LoginForm({ onSuccess }) {
                         }
                       }}
                       placeholder="Enter your password"
-                      className="
+                      className={`
                         h-11
-
-                        border-slate-200
                         bg-white/80
-
                         pl-10
                         pr-11
-
                         text-slate-800
                         placeholder:text-slate-400
-
                         focus:border-[#30276f]
                         focus:ring-[#30276f]/20
-                      "
+                        ${
+                          error &&
+                          (error.toLowerCase().includes("password") ||
+                            error.toLowerCase().includes("credentials"))
+                            ? "border-rose-300 ring-1 ring-rose-200 bg-rose-50/15"
+                            : "border-slate-200"
+                        }
+                      `}
                     />
 
                     {/* Show / Hide Password */}
@@ -378,27 +384,40 @@ export default function LoginForm({ onSuccess }) {
                 </div>
 
                 {/* =================================================
-                    ERROR
+                    ERROR ALERT
                     ================================================= */}
                 {error && (
-                  <p
+                  <div
+                    role="alert"
                     className="
-                      rounded-lg
-
+                      flex
+                      items-start
+                      gap-3
+                      rounded-xl
                       border
                       border-rose-200
-
-                      bg-rose-50
-
-                      px-3
-                      py-2
-
-                      text-sm
-                      text-rose-700
+                      bg-rose-50/90
+                      p-3.5
+                      text-xs
+                      shadow-xs
+                      animate-in
+                      fade-in
+                      slide-in-from-top-1.5
+                      duration-200
                     "
                   >
-                    {error}
-                  </p>
+                    <div className="h-6 w-6 rounded-lg bg-rose-100 flex items-center justify-center text-rose-600 shrink-0 mt-0.5">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-rose-950 text-[12.5px] leading-tight">
+                        Unable to sign in
+                      </p>
+                      <p className="text-rose-700 text-[12px] leading-relaxed mt-0.5">
+                        {error}
+                      </p>
+                    </div>
+                  </div>
                 )}
 
                 {/* =================================================

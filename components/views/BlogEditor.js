@@ -19,6 +19,7 @@ import {
   Link2,
   Link2Off,
   KeyRound,
+  LockKeyhole,
   Image as ImageIcon,
   Table,
   Minus,
@@ -30,6 +31,7 @@ import {
   Redo2,
   Save,
   Eye,
+  EyeOff,
   CalendarClock,
   Globe,
   Rocket,
@@ -280,10 +282,18 @@ const emptyForm = () => ({
 });
 
 // ---------- main ----------
-export default function BlogEditor({ blogId, navigate, can, user, focus }) {
+export default function BlogEditor({
+  blogId,
+  navigate,
+  can,
+  user,
+  setUser,
+  focus,
+}) {
   const isEdit = !!blogId;
   const [id, setId] = useState(blogId);
   const idRef = useRef(blogId || null);
+  const justCreatedRef = useRef(false);
   const [form, setForm] = useState(emptyForm());
   const [loading, setLoading] = useState(isEdit);
   const [dirty, setDirty] = useState(false);
@@ -292,6 +302,16 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
+  const [sessionExpiredOpen, setSessionExpiredOpen] = useState(false);
+  const [reAuthEmail, setReAuthEmail] = useState(user?.email || "");
+  const [reAuthPassword, setReAuthPassword] = useState("");
+  const [reAuthShowPass, setReAuthShowPass] = useState(false);
+  const [reAuthLoading, setReAuthLoading] = useState(false);
+  const [reAuthError, setReAuthError] = useState("");
+  const [localDraftNotice, setLocalDraftNotice] = useState(null);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [leaveTarget, setLeaveTarget] = useState("blogs");
+  const [saveAndLeaveLoading, setSaveAndLeaveLoading] = useState(false);
   const [tab, setTab] = useState("seo");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -327,6 +347,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const [linkBar, setLinkBar] = useState(null); // { el, href, text }
   const [linkBarPos, setLinkBarPos] = useState({ top: 0, left: 0 });
   const [highlight, setHighlight] = useState(null);
+  const [validationErrors, setValidationErrors] = useState({});
   const [seoSheetOpen, setSeoSheetOpen] = useState(false);
   const [relatedKeywordsOpen, setRelatedKeywordsOpen] = useState(false);
   const [editingKeyword, setEditingKeyword] = useState("");
@@ -361,10 +382,9 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   );
   const categories = useMemo(() => {
     const list = contentOptions?.categories || [];
-    if (form.category && !list.includes(form.category)) {
-      return [form.category, ...list];
-    }
-    return list;
+    const set = new Set(["General", ...list]);
+    if (form.category) set.add(form.category);
+    return Array.from(set);
   }, [contentOptions?.categories, form.category]);
 
   const subcategories = useMemo(() => {
@@ -482,6 +502,11 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
       setHasChanges(false);
       return;
     }
+    // If this blog was just created by autosave in this editor, skip re-fetching and skeleton loading
+    if (justCreatedRef.current) {
+      justCreatedRef.current = false;
+      return;
+    }
     setLoading(true);
     api("/blogs/" + id)
       .then((b) => {
@@ -516,6 +541,55 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Check for unsaved local draft in browser localStorage
+  useEffect(() => {
+    if (loading) return;
+    const draftKey = "ss_draft_" + (id || "new");
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.savedAt) {
+          if (isEdit && lastSaved) {
+            const serverTime = new Date(lastSaved).getTime();
+            // If local draft is at least 3 seconds newer than server lastSaved
+            if (parsed.savedAt > serverTime + 3000) {
+              setLocalDraftNotice(parsed);
+            }
+          } else if (
+            !isEdit &&
+            (parsed.form?.title ||
+              (parsed.contentHtml && parsed.contentHtml.length > 20))
+          ) {
+            setLocalDraftNotice(parsed);
+          }
+        }
+      }
+    } catch (err) {}
+  }, [id, isEdit, lastSaved, loading]);
+
+  const restoreLocalDraft = () => {
+    if (!localDraftNotice) return;
+    if (localDraftNotice.form) {
+      setForm(localDraftNotice.form);
+    }
+    if (localDraftNotice.contentHtml && editorRef.current) {
+      editorRef.current.innerHTML = localDraftNotice.contentHtml;
+    }
+    setDirty(true);
+    setHasChanges(true);
+    toast.success("Unsaved local draft restored! 🎉");
+    setLocalDraftNotice(null);
+  };
+
+  const discardLocalDraft = () => {
+    try {
+      localStorage.removeItem("ss_draft_" + (id || "new"));
+    } catch (err) {}
+    setLocalDraftNotice(null);
+    toast.info("Local draft discarded.");
+  };
 
   // Handle auto-focusing on specific fields when navigating from SEO audit/issues
   useEffect(() => {
@@ -1021,25 +1095,179 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     onEdit();
   }
 
-  // Autosave (only for drafts, not for published blogs to prevent accidental live changes)
+  // Unsaved changes tab-close guard (prevents accidental tab close or refresh)
   useEffect(() => {
-    if (!dirty || !id || saving || form.status === "published") return;
+    const onBeforeUnload = (e) => {
+      if (hasChanges || dirty) {
+        e.preventDefault();
+        e.returnValue =
+          "You have unsaved changes. Are you sure you want to leave?";
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasChanges, dirty]);
+
+  // Local storage auto-backup (every 1.5s while typing, so even crash/timeout can't lose work)
+  useEffect(() => {
+    if (!dirty && !hasChanges) return;
+    const draftKey = "ss_draft_" + (id || "new");
+    const timer = setTimeout(() => {
+      try {
+        const currentHtml = editorRef.current
+          ? editorRef.current.innerHTML
+          : form.contentHtml;
+        const draftPayload = {
+          form,
+          contentHtml: currentHtml,
+          savedAt: Date.now(),
+          id: id || null,
+        };
+        localStorage.setItem(draftKey, JSON.stringify(draftPayload));
+      } catch (err) {}
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [form, dirty, hasChanges, id]);
+
+  // Session expired event listener
+  useEffect(() => {
+    const onSessionExpired = () => {
+      try {
+        const currentHtml = editorRef.current
+          ? editorRef.current.innerHTML
+          : form.contentHtml;
+        localStorage.setItem(
+          "ss_draft_" + (id || "new"),
+          JSON.stringify({
+            form,
+            contentHtml: currentHtml,
+            savedAt: Date.now(),
+            id: id || null,
+          }),
+        );
+      } catch (err) {}
+      setSessionExpiredOpen(true);
+      if (user?.email) setReAuthEmail(user.email);
+      setReAuthError("");
+    };
+    window.addEventListener("ss-session-expired", onSessionExpired);
+    return () =>
+      window.removeEventListener("ss-session-expired", onSessionExpired);
+  }, [id, form, user?.email]);
+
+  // In-place re-authentication handler (preserves in-memory content & immediately saves)
+  async function handleReAuth(e) {
+    if (e) e.preventDefault();
+    if (!reAuthPassword) {
+      setReAuthError("Please enter your password.");
+      return;
+    }
+    setReAuthLoading(true);
+    setReAuthError("");
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          email: reAuthEmail.trim(),
+          password: reAuthPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Login failed");
+      }
+      if (setUser) setUser(data.user);
+      setSessionExpiredOpen(false);
+      setReAuthPassword("");
+      toast.success("Session restored! Saving your blog now... 🎉");
+      await save(false);
+    } catch (err) {
+      setReAuthError(err.message || "Failed to log in. Please check password.");
+    } finally {
+      setReAuthLoading(false);
+    }
+  }
+
+  // Autosave to DB (only for drafts, not for published blogs to prevent accidental live changes)
+  useEffect(() => {
+    if (!dirty || saving || form.status === "published" || !form.title.trim())
+      return;
     const t = setTimeout(() => {
       save(true);
     }, 2500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, dirty]);
+  }, [form, dirty, id, saving]);
 
   const up = (patch) => {
-    setForm((f) => ({
-      ...f,
-      ...(typeof patch === "function" ? patch(f) : patch),
-    }));
+    setForm((f) => {
+      const updated = typeof patch === "function" ? patch(f) : patch;
+      return { ...f, ...updated };
+    });
+    setValidationErrors((prev) => {
+      const next = { ...prev };
+      const delta = typeof patch === "function" ? patch(form) : patch;
+      if (delta.title && delta.title.trim()) delete next.title;
+      if (delta.author) delete next.author;
+      if (delta.category) delete next.category;
+      if (delta.featuredImage?.url) delete next.featuredImage;
+      return next;
+    });
     setDirty(true);
     setHasChanges(true);
   };
   const upSeo = (patch) => up((f) => ({ seo: { ...f.seo, ...patch } }));
+
+  const validateMandatoryFields = (actionName = "publish") => {
+    const errors = {};
+    const missingNames = [];
+
+    if (!(form.title || "").trim()) {
+      errors.title = "Blog title is required to " + actionName;
+      missingNames.push("Blog title");
+    }
+    if (!form.author) {
+      errors.author = "Author is required to " + actionName;
+      missingNames.push("Author");
+    }
+    if (!form.featuredImage?.url) {
+      errors.featuredImage = "Featured image is required to " + actionName;
+      missingNames.push("Featured image");
+    }
+
+    // Auto-assign default category "General" if author left it unselected
+    if (!form.category) {
+      up({ category: "General" });
+    }
+
+    setValidationErrors(errors);
+
+    if (missingNames.length > 0) {
+      toast.error(
+        `Cannot ${actionName}: Mandatory field${missingNames.length > 1 ? "s" : ""} missing (${missingNames.join(", ")}).`,
+        { duration: 5000 },
+      );
+      setTimeout(() => {
+        if (errors.title) {
+          const el = document.getElementById("f-title");
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          el?.focus();
+        } else if (errors.author) {
+          const el = document.getElementById("f-author");
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          el?.focus();
+        } else if (errors.featuredImage) {
+          const el = document.getElementById("featured-card");
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 100);
+      return false;
+    }
+    return true;
+  };
 
   async function save(silent) {
     if (!can("blogs.edit") && isEdit) {
@@ -1061,14 +1289,18 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         : form.contentHtml;
       // Auto-normalize all links (internal blog links, Vinimay pages, protocol fixes)
       const sanitizedHtml = normalizeHtmlContent(rawHtml || "");
-      if (editorRef.current && editorRef.current.innerHTML !== sanitizedHtml) {
+      if (
+        !silent &&
+        editorRef.current &&
+        editorRef.current.innerHTML !== sanitizedHtml
+      ) {
         editorRef.current.innerHTML = sanitizedHtml;
       }
 
       const payload = {
         title: form.title,
         slug: form.slug || slugify(form.title),
-        category: form.category,
+        category: form.category || "General",
         subcategory: form.subcategory,
         author: form.author || user?.name,
         tags: form.tags,
@@ -1084,44 +1316,104 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         publishedAt: form.publishedAt !== undefined ? form.publishedAt : null,
       };
       const activeId = id || idRef.current;
+      let savedBlog = null;
+
       if (activeId) {
-        const b = await api("/blogs/" + activeId, { method: "PUT", body: payload });
-        setLastSaved(b.updatedAt);
+        savedBlog = await api("/blogs/" + activeId, {
+          method: "PUT",
+          body: payload,
+        });
+        setLastSaved(savedBlog.updatedAt);
         setForm((f) => ({
           ...f,
-          slug: b.slug,
-          seo: { ...f.seo, score: b.seo?.score ?? analysis.score },
+          slug: savedBlog.slug,
+          seo: { ...f.seo, score: savedBlog.seo?.score ?? analysis.score },
         }));
-        window.dispatchEvent(new Event("ss-refresh"));
-        return b.id;
       } else {
-        const b = await api("/blogs", { method: "POST", body: payload });
-        setId(b.id);
-        idRef.current = b.id;
-        setLastSaved(b.updatedAt);
+        savedBlog = await api("/blogs", { method: "POST", body: payload });
+        idRef.current = savedBlog.id;
+        justCreatedRef.current = true;
+        setId(savedBlog.id);
+        setLastSaved(savedBlog.updatedAt);
         window.history.replaceState(
           null,
           "",
-          "/dashboard/editor?id=" + encodeURIComponent(b.id),
+          "/dashboard/editor?id=" + encodeURIComponent(savedBlog.id),
         );
-        window.dispatchEvent(new Event("ss-refresh"));
-        return b.id;
       }
+
+      window.dispatchEvent(new Event("ss-refresh"));
       setDirty(false);
+      setHasChanges(false);
+
+      // Clean up local draft backup since now safely saved to backend
+      try {
+        localStorage.removeItem("ss_draft_" + (activeId || "new"));
+        if (savedBlog?.id) localStorage.removeItem("ss_draft_" + savedBlog.id);
+      } catch (err) {}
+
       if (!silent) {
-        setHasChanges(false);
         toast.success(
           isEdit ? "Blog saved successfully" : "Draft created successfully",
         );
       }
+      return savedBlog?.id || activeId;
     } catch (e) {
-      toast.error(e.message);
+      if (
+        e.status === 401 ||
+        e.message?.toLowerCase().includes("unauthorized") ||
+        e.message?.includes("401")
+      ) {
+        try {
+          const currentHtml = editorRef.current
+            ? editorRef.current.innerHTML
+            : form.contentHtml;
+          localStorage.setItem(
+            "ss_draft_" + (id || idRef.current || "new"),
+            JSON.stringify({
+              form,
+              contentHtml: currentHtml,
+              savedAt: Date.now(),
+              id: id || idRef.current || null,
+            }),
+          );
+        } catch (err) {}
+        setSessionExpiredOpen(true);
+        if (user?.email) setReAuthEmail(user.email);
+        toast.error(
+          "Session expired! Your blog is safe. Please enter your password to save.",
+          { duration: 8000 },
+        );
+      } else {
+        toast.error(e.message);
+      }
     } finally {
       setSaving(false);
     }
   }
 
+  async function handleSaveAndLeave() {
+    setSaveAndLeaveLoading(true);
+    try {
+      const savedId = await save(false);
+      if (savedId) {
+        setLeaveConfirmOpen(false);
+        setDirty(false);
+        setHasChanges(false);
+        navigate(leaveTarget, {});
+      }
+    } catch (e) {
+    } finally {
+      setSaveAndLeaveLoading(false);
+    }
+  }
+
   async function transition(to, scheduledAt, feedback) {
+    if (to === "published" || to === "scheduled") {
+      if (!validateMandatoryFields(to === "scheduled" ? "schedule" : "publish")) {
+        return;
+      }
+    }
     const savedId = await save(true);
     const bid = savedId || idRef.current || id;
     if (!bid) {
@@ -1857,7 +2149,8 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
   const checklist = useMemo(
     () => [
       {
-        label: "Title",
+        label: "Blog title",
+        required: true,
         ok: !!(form.title || "").trim(),
         fix: () => {
           setChecklistOpen(false);
@@ -1865,6 +2158,45 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
             const el = document.getElementById("f-title");
             el?.scrollIntoView({ behavior: "smooth", block: "center" });
             el?.focus();
+          }, 120);
+        },
+      },
+      {
+        label: "Author",
+        required: true,
+        ok: !!form.author,
+        fix: () => {
+          setChecklistOpen(false);
+          setTimeout(() => {
+            const el = document.getElementById("f-author");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            el?.focus();
+          }, 120);
+        },
+      },
+      {
+        label: "Category",
+        required: false,
+        ok: true,
+        fix: () => {
+          setChecklistOpen(false);
+          setTimeout(() => {
+            const el = document.getElementById("f-category");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            el?.focus();
+          }, 120);
+        },
+      },
+      {
+        label: "Featured image",
+        required: true,
+        ok: !!form.featuredImage?.url,
+        fix: () => {
+          setChecklistOpen(false);
+          setTimeout(() => {
+            document
+              .getElementById("featured-card")
+              ?.scrollIntoView({ behavior: "smooth", block: "center" });
           }, 120);
         },
       },
@@ -1879,18 +2211,6 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
               block: "center",
             });
             editorRef.current?.focus();
-          }, 120);
-        },
-      },
-      {
-        label: "Featured image",
-        ok: !!form.featuredImage?.url,
-        fix: () => {
-          setChecklistOpen(false);
-          setTimeout(() => {
-            document
-              .getElementById("featured-card")
-              ?.scrollIntoView({ behavior: "smooth", block: "center" });
           }, 120);
         },
       },
@@ -1963,30 +2283,6 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 .getElementById("featured-card")
                 ?.scrollIntoView({ behavior: "smooth", block: "center" });
             }
-          }, 120);
-        },
-      },
-      {
-        label: "Author",
-        ok: !!form.author,
-        fix: () => {
-          setChecklistOpen(false);
-          setTimeout(() => {
-            const el = document.getElementById("f-author");
-            el?.scrollIntoView({ behavior: "smooth", block: "center" });
-            el?.focus();
-          }, 120);
-        },
-      },
-      {
-        label: "Category",
-        ok: !!form.category,
-        fix: () => {
-          setChecklistOpen(false);
-          setTimeout(() => {
-            const el = document.getElementById("f-category");
-            el?.scrollIntoView({ behavior: "smooth", block: "center" });
-            el?.focus();
           }, 120);
         },
       },
@@ -2193,7 +2489,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
     ? "Saving…"
     : lastSaved
       ? "Saved " + TIME_AGO_SHORT(lastSaved)
-      : "Not saved yet";
+      : "Draft";
 
   const rail = (
     <EditorRail
@@ -2254,7 +2550,14 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => navigate("blogs", {})}
+            onClick={() => {
+              if (hasChanges || dirty) {
+                setLeaveTarget("blogs");
+                setLeaveConfirmOpen(true);
+              } else {
+                navigate("blogs", {});
+              }
+            }}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
@@ -2278,7 +2581,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
             </div>
             <p className="text-[11.5px] text-muted-foreground flex items-center gap-1.5">
               {saving ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
               ) : (
                 <CheckCircle2 className="h-3 w-3 text-emerald-500" />
               )}
@@ -2370,16 +2673,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                     size="sm"
                     className="h-9"
                     onClick={() => {
-                      if (
-                        (form.status === "draft" ||
-                          form.status === "in_review") &&
-                        !checklistOk
-                      ) {
-                        toast.warning(
-                          `SEO score is ${analysis.score}/100 with incomplete checklist items. Opening schedule...`,
-                          { duration: 4000 },
-                        );
-                      }
+                      if (!validateMandatoryFields("schedule")) return;
                       setScheduleOpen(true);
                     }}
                   >
@@ -2402,6 +2696,7 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                   onClick={() => {
                     if (form.status === "published" && !hasChanges && !dirty)
                       return;
+                    if (!validateMandatoryFields("publish")) return;
                     setChecklistOpen(true);
                   }}
                   disabled={
@@ -2511,6 +2806,35 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         </div>
       </div>
 
+      {/* Local Draft Restored Banner */}
+      {localDraftNotice && (
+        <div className="bg-amber-50/90 dark:bg-amber-950/60 border-b border-amber-200 dark:border-amber-900 px-4 lg:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-[13px] text-amber-900 dark:text-amber-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              <strong>Unsaved Local Draft Found:</strong> We detected unsaved changes from {timeAgo(localDraftNotice.savedAt)}. Would you like to restore your work?
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+              onClick={discardLocalDraft}
+            >
+              Discard Draft
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-xs"
+              onClick={restoreLocalDraft}
+            >
+              Restore Draft
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="flex">
         {/* Main column */}
         <div className="flex-1 min-w-0 px-4 lg:px-8 py-6 space-y-5 max-w-[860px] mx-auto xl:mx-0 xl:ml-[max(2rem,calc(50%-560px))]">
@@ -2560,10 +2884,19 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                         })
                       }
                       placeholder="Enter your blog title…"
-                      className="text-[16px] font-medium h-11"
+                      className={`text-[16px] font-medium h-11 ${
+                        validationErrors.title
+                          ? "border-red-500 ring-2 ring-red-200 dark:ring-red-950/70"
+                          : ""
+                      }`}
                       maxLength={140}
                     />
                   </div>
+                  {validationErrors.title && (
+                    <p className="text-xs text-red-500 font-medium flex items-center gap-1 mt-1">
+                      <span>⚠️</span> {validationErrors.title}
+                    </p>
+                  )}
                 </Labeled>
                 <div className="flex flex-wrap items-center gap-3 text-[11.5px] text-muted-foreground pl-0.5">
                   <span
@@ -2625,7 +2958,14 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                     value={form.author || ""}
                     onValueChange={(v) => up({ author: v })}
                   >
-                    <SelectTrigger id="f-author" className="bg-muted/30">
+                    <SelectTrigger
+                      id="f-author"
+                      className={`bg-muted/30 ${
+                        validationErrors.author
+                          ? "border-red-500 ring-2 ring-red-200 dark:ring-red-950/70"
+                          : ""
+                      }`}
+                    >
                       <SelectValue placeholder="Select author" />
                     </SelectTrigger>
                     <SelectContent>
@@ -2638,6 +2978,11 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                         ))}
                     </SelectContent>
                   </Select>
+                  {validationErrors.author && (
+                    <p className="text-xs text-red-500 font-medium flex items-center gap-1 mt-1">
+                      <span>⚠️</span> {validationErrors.author}
+                    </p>
+                  )}
                 </Labeled>
                 <Labeled label="Category" required htmlFor="f-category">
                   <SearchableSelect
@@ -2701,7 +3046,14 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
               </Labeled>
 
               {/* Featured image */}
-              <div id="featured-card" className="space-y-3">
+              <div
+                id="featured-card"
+                className={`space-y-3 rounded-xl transition-all ${
+                  validationErrors.featuredImage && !form.featuredImage.url
+                    ? "p-3 border-2 border-red-500 ring-2 ring-red-200 dark:ring-red-950/70 bg-red-50/20"
+                    : ""
+                }`}
+              >
                 <Labeled
                   label="Featured image"
                   required={!form.featuredImage.url}
@@ -2816,6 +3168,11 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                     </div>
                   )}
                 </Labeled>
+                {validationErrors.featuredImage && !form.featuredImage.url && (
+                  <p className="text-xs text-red-500 font-medium flex items-center gap-1 mt-1">
+                    <span>⚠️</span> {validationErrors.featuredImage}
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -4026,7 +4383,14 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
                 ) : (
                   <XCircle className="h-4 w-4 text-amber-500 shrink-0" />
                 )}
-                <span className="text-[13px] flex-1">{c.label}</span>
+                <span className="text-[13px] flex-1 flex items-center gap-2">
+                  <span>{c.label}</span>
+                  {!c.ok && c.required && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400">
+                      Required
+                    </span>
+                  )}
+                </span>
                 {!c.ok && (
                   <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
                     Fix →
@@ -4065,6 +4429,185 @@ export default function BlogEditor({ blogId, navigate, can, user, focus }) {
         form={form}
         analysis={analysis}
       />
+
+      {/* Leave confirmation modal when leaving editor with unsaved changes */}
+      <Dialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="h-9 w-9 rounded-xl bg-amber-100 dark:bg-amber-950/60 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-semibold">
+                  Unsaved changes in blog
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  You have unsaved changes. What would you like to do before leaving?
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="py-1 text-xs text-muted-foreground">
+            If you leave without saving, your recent edits will be kept only in local browser cache and not updated on the server.
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-between sm:gap-2 pt-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setLeaveConfirmOpen(false)}
+              disabled={saveAndLeaveLoading}
+              className="text-xs order-3 sm:order-1"
+            >
+              Stay in Editor
+            </Button>
+            <div className="flex items-center gap-2 justify-end order-1 sm:order-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                onClick={() => {
+                  setLeaveConfirmOpen(false);
+                  setDirty(false);
+                  setHasChanges(false);
+                  navigate(leaveTarget, {});
+                }}
+                disabled={saveAndLeaveLoading}
+              >
+                Leave without saving
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="text-xs bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-medium gap-1.5 shadow-xs"
+                onClick={handleSaveAndLeave}
+                disabled={saveAndLeaveLoading}
+              >
+                {saveAndLeaveLoading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-3.5 w-3.5" />
+                    Save & Leave
+                  </>
+                )}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Session Expired In-Place Re-Authentication Dialog */}
+      <Dialog open={sessionExpiredOpen} onOpenChange={setSessionExpiredOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="h-9 w-9 rounded-xl bg-amber-100 dark:bg-amber-950/60 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                <LockKeyhole className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-semibold">
+                  Session Expired
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Your blog draft is safe. Log in to continue saving.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <form onSubmit={handleReAuth} className="space-y-4 py-2">
+            <div className="rounded-lg bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/50 p-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+              <span>
+                <strong>Zero Data Loss:</strong> Enter your credentials to refresh your session. Your work will be saved automatically without reloading the page.
+              </span>
+            </div>
+
+            {reAuthError && (
+              <div className="rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 p-2.5 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                <XCircle className="h-4 w-4 shrink-0" />
+                <span>{reAuthError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Email</label>
+              <Input
+                type="email"
+                value={reAuthEmail}
+                onChange={(e) => setReAuthEmail(e.target.value)}
+                placeholder="user@sharda.co.in"
+                className="h-9 text-xs"
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Password</label>
+              <div className="relative">
+                <Input
+                  type={reAuthShowPass ? "text" : "password"}
+                  value={reAuthPassword}
+                  onChange={(e) => setReAuthPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="h-9 text-xs pr-9"
+                  autoFocus
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setReAuthShowPass(!reAuthShowPass)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
+                >
+                  {reAuthShowPass ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setSessionExpiredOpen(false)}
+                disabled={reAuthLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-medium gap-1.5"
+                disabled={reAuthLoading || !reAuthPassword}
+              >
+                {reAuthLoading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Logging In & Saving...
+                  </>
+                ) : (
+                  <>
+                    <LockKeyhole className="h-3.5 w-3.5" />
+                    Log In & Save Blog
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Confirmation modal when submitting an already-published blog for review */}
       <ConfirmDialog
