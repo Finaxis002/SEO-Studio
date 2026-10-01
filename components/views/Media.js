@@ -39,7 +39,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Labeled } from "../bits";
-import { api, fetcher, fmtDate, fmtNum } from "@/lib/client";
+import {
+  api,
+  fetcher,
+  fmtDate,
+  fmtNum,
+  getImageThumbnailUrl,
+} from "@/lib/client";
 import { EmptyState, ConfirmDialog } from "../bits";
 
 export default function Media({ navigate, can, initialUpload }) {
@@ -142,17 +148,6 @@ export default function Media({ navigate, can, initialUpload }) {
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasMore, isValidating, loadingMore, setSize]);
-
-  function getThumbnailUrl(url) {
-    if (!url || typeof url !== "string") return url;
-    if (url.includes("res.cloudinary.com") && url.includes("/image/upload/")) {
-      return url.replace(
-        "/image/upload/",
-        "/image/upload/w_400,c_fill,q_auto,f_auto/",
-      );
-    }
-    return url;
-  }
 
   // Open upload dialog automatically when arriving via "Upload Images" nav
   useEffect(() => {
@@ -474,9 +469,10 @@ export default function Media({ navigate, can, initialUpload }) {
                   <div className="relative h-40 bg-muted">
                     {m.type === "image" ? (
                       <img
-                        src={getThumbnailUrl(m.url)}
+                        src={getImageThumbnailUrl(m.url, 400)}
                         alt={m.alt || m.name}
                         loading="lazy"
+                        decoding="async"
                         className="h-full w-full object-cover group-hover:scale-[1.04] transition-transform duration-300"
                       />
                     ) : (

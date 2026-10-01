@@ -51,6 +51,7 @@ import {
   initials,
   getVinimayBlogUrl,
   getVinimayUrl,
+  getImageThumbnailUrl,
 } from "@/lib/client";
 import { analyzeSeo } from "@/lib/seo";
 import {
@@ -230,9 +231,11 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
         <CardContent className="p-5 flex flex-col lg:flex-row lg:items-center gap-5">
           {b.featuredImage?.url && (
             <img
-              src={b.featuredImage.url}
+              src={getImageThumbnailUrl(b.featuredImage.url, 640)}
               alt=""
               className="w-full lg:w-56 h-32 object-cover rounded-xl border border-border"
+              decoding="async"
+              fetchPriority="high"
             />
           )}
           <div className="flex-1 min-w-0">
@@ -1036,9 +1039,11 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
               {usedMedia.map((m) => (
                 <Card key={m.id} className="card-hover overflow-hidden">
                   <img
-                    src={m.url}
+                    src={getImageThumbnailUrl(m.url, 320, 240)}
                     alt={m.alt}
                     className="h-36 w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
                   />
                   <CardContent className="p-3">
                     <p className="text-[12.5px] font-medium truncate">
