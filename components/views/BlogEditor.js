@@ -118,6 +118,7 @@ import {
   STATUS_META,
   getVinimayBlogUrl,
   getVinimayUrl,
+  getImageThumbnailUrl,
 } from "@/lib/client";
 import {
   analyzeSeo,
@@ -3165,9 +3166,13 @@ export default function BlogEditor({
                     <div className="space-y-3">
                       <div className="relative group rounded-xl overflow-hidden border border-border">
                         <img
-                          src={form.featuredImage.url}
+                          src={getImageThumbnailUrl(
+                            form.featuredImage.url,
+                            640,
+                          )}
                           alt={form.featuredImage.alt}
                           className="w-full h-56 object-cover"
+                          decoding="async"
                         />
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
                           <Button
@@ -5740,9 +5745,15 @@ function EditorRail({
               </div>
               {(form.seo.ogImage || form.featuredImage.url) && (
                 <img
-                  src={form.seo.ogImage || form.featuredImage.url}
+                  src={getImageThumbnailUrl(
+                    form.seo.ogImage || form.featuredImage.url,
+                    640,
+                    256,
+                  )}
                   alt=""
                   className="w-full h-32 object-cover"
+                  loading="lazy"
+                  decoding="async"
                 />
               )}
               <div className="p-3 bg-muted/30">
@@ -5765,9 +5776,15 @@ function EditorRail({
               </div>
               {(form.seo.twitterImage || form.featuredImage.url) && (
                 <img
-                  src={form.seo.twitterImage || form.featuredImage.url}
+                  src={getImageThumbnailUrl(
+                    form.seo.twitterImage || form.featuredImage.url,
+                    640,
+                    256,
+                  )}
                   alt=""
                   className="w-full h-32 object-cover"
+                  loading="lazy"
+                  decoding="async"
                 />
               )}
               <div className="p-3 bg-muted/30">
@@ -6432,9 +6449,11 @@ function ImageDialog({ state, onClose, onUpload, onInsert, onApply }) {
                       }`}
                     >
                       <img
-                        src={m.url}
+                        src={getImageThumbnailUrl(m.url, 400, 240)}
                         alt={m.alt || m.name}
                         className="h-16 w-full object-cover group-hover:scale-105 transition-transform"
+                        loading="lazy"
+                        decoding="async"
                       />
                       <p className="text-[10px] truncate px-1 py-0.5 text-muted-foreground bg-background/90">
                         {m.name}
@@ -6584,10 +6603,11 @@ function MediaPicker({ open, target, onClose, onPick }) {
                 >
                   <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
                     <img
-                      src={m.url}
+                      src={getImageThumbnailUrl(m.url, 400, 225)}
                       alt={m.alt || m.name}
                       className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
                       loading="lazy"
+                      decoding="async"
                     />
                     {m.format && (
                       <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-black/60 text-white backdrop-blur-xs uppercase">

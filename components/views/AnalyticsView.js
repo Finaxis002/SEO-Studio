@@ -35,7 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetcher, fmtNum, fmtDate } from "@/lib/client";
+import { fetcher, fmtNum, fmtDate, getImageThumbnailUrl } from "@/lib/client";
 import { TrendChart, PositionChart, Donut } from "../charts";
 import { EmptyState } from "../bits";
 
@@ -619,9 +619,15 @@ export default function AnalyticsView({ initialTab, navigate }) {
                                 <div className="flex items-center gap-3">
                                   {item.featuredImage ? (
                                     <img
-                                      src={item.featuredImage}
+                                      src={getImageThumbnailUrl(
+                                        item.featuredImage,
+                                        128,
+                                        128,
+                                      )}
                                       alt={item.title}
                                       className="w-10 h-10 rounded-lg object-cover border border-border shrink-0 shadow-xs"
+                                      loading="lazy"
+                                      decoding="async"
                                     />
                                   ) : (
                                     <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center border border-border shrink-0 text-muted-foreground">

@@ -42,7 +42,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, fetcher, fmtNum, fmtDate, timeAgo, initials } from "@/lib/client";
+import {
+  api,
+  fetcher,
+  fmtNum,
+  fmtDate,
+  timeAgo,
+  initials,
+  getImageThumbnailUrl,
+} from "@/lib/client";
 import {
   StatCard,
   StatusBadge,
@@ -481,15 +489,25 @@ export default function Dashboard({ user, navigate, can }) {
                         <button
                           className="flex items-center gap-3 text-left"
                           onClick={() => {
-                            swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+                            swrMutate(
+                              "/api/blogs/" + b.id,
+                              (prev) => prev || b,
+                              false,
+                            );
                             navigate("blog", { id: b.id });
                           }}
                         >
                           {b.featuredImage?.url ? (
                             <img
-                              src={b.featuredImage.url}
+                              src={getImageThumbnailUrl(
+                                b.featuredImage.url,
+                                224,
+                                160,
+                              )}
                               alt=""
                               className="h-10 w-14 rounded-lg object-cover border border-border"
+                              loading="lazy"
+                              decoding="async"
                             />
                           ) : (
                             <div className="h-10 w-14 rounded-lg bg-muted border border-border" />

@@ -52,6 +52,7 @@ import {
   timeAgo,
   initials,
   getVinimayBlogUrl,
+  getImageThumbnailUrl,
 } from "@/lib/client";
 import {
   StatusBadge,
@@ -157,7 +158,6 @@ export default function Blogs({ statusFilter, navigate, can }) {
     window.dispatchEvent(new Event("ss-refresh"));
   };
 
-
   const openBlog = (b) => {
     if (b?.id) {
       preload("/api/blogs/" + b.id, fetcher);
@@ -230,7 +230,10 @@ export default function Blogs({ statusFilter, navigate, can }) {
         },
       },
       {
-        label: b.status === "scheduled" || b.status === "published" ? "Reschedule" : "Schedule",
+        label:
+          b.status === "scheduled" || b.status === "published"
+            ? "Reschedule"
+            : "Schedule",
         icon: CalendarClock,
         show:
           (b.status === "draft" ||
@@ -302,7 +305,8 @@ export default function Blogs({ statusFilter, navigate, can }) {
                 description: `"${b.title}" is now live on Vinimay.`,
                 action: {
                   label: "View on Vinimay ↗",
-                  onClick: () => window.open(getVinimayBlogUrl(b.slug), "_blank"),
+                  onClick: () =>
+                    window.open(getVinimayBlogUrl(b.slug), "_blank"),
                 },
                 duration: 9000,
               });
@@ -364,7 +368,11 @@ export default function Blogs({ statusFilter, navigate, can }) {
       {
         label: isPub ? "Unpublish to Draft" : "Move to Draft",
         icon: RotateCcw,
-        show: isPub || isSched || b.status === "archived" || b.status === "approved",
+        show:
+          isPub ||
+          isSched ||
+          b.status === "archived" ||
+          b.status === "approved",
         onClick: () => {
           const isAppr = b.status === "approved";
           setConfirmDialog({
@@ -628,9 +636,15 @@ export default function Blogs({ statusFilter, navigate, can }) {
                         <div className="flex items-center gap-3">
                           {b.featuredImage?.url ? (
                             <img
-                              src={b.featuredImage.url}
+                              src={getImageThumbnailUrl(
+                                b.featuredImage.url,
+                                256,
+                                176,
+                              )}
                               alt=""
                               className="h-11 w-16 rounded-lg object-cover border border-border"
+                              loading="lazy"
+                              decoding="async"
                             />
                           ) : (
                             <div className="h-11 w-16 rounded-lg bg-muted border border-border flex items-center justify-center">
