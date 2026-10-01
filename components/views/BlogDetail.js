@@ -1,10 +1,12 @@
 "use client";
 
-import useSWR from "swr";
+import { useState, useMemo } from "react";
+import useSWR, { mutate as swrMutate } from "swr";
 import { toast } from "sonner";
 import {
   ArrowLeft,
   Pencil,
+  Loader2,
   Eye,
   Copy,
   Archive,
@@ -25,6 +27,7 @@ import {
   RotateCcw,
   Rocket,
   CalendarClock,
+  ChevronDown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -61,18 +64,26 @@ import {
   ScheduleDialog,
 } from "../bits";
 import { Donut } from "../charts";
-import { useState } from "react";
 
 export default function BlogDetail({ blogId, navigate, can }) {
+  const [activeTab, setActiveTab] = useState("content");
   const {
     data: b,
     error,
     mutate,
   } = useSWR(blogId ? "/api/blogs/" + blogId : null, fetcher);
-  const { data: activity } = useSWR("/api/activity", fetcher);
-  const { data: media } = useSWR("/api/media", fetcher);
+
+  // Lazy-load activity, media, and indexing only when relevant tab is active
+  const { data: activity } = useSWR(
+    activeTab === "activity" ? "/api/activity" : null,
+    fetcher,
+  );
+  const { data: media } = useSWR(
+    activeTab === "images" ? "/api/media" : null,
+    fetcher,
+  );
   const { data: indexData } = useSWR(
-    b?.status === "published" ? "/api/indexing" : null,
+    activeTab === "seo" && b?.status === "published" ? "/api/indexing" : null,
     fetcher,
   );
   const thisBlogIndex = (indexData?.items || []).find(
@@ -81,6 +92,7 @@ export default function BlogDetail({ blogId, navigate, can }) {
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [previewLang, setPreviewLang] = useState("en");
 
   if (error)
     return (
@@ -94,24 +106,74 @@ export default function BlogDetail({ blogId, navigate, can }) {
     );
   if (!b)
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-28 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <div className="space-y-4 animate-fade-up">
+        <div className="flex items-center justify-between pb-2 border-b border-border/60">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-8 w-20 rounded-md" />
+            <Skeleton className="h-5 w-48 rounded" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-8 w-20 rounded-md" />
+            <Skeleton className="h-8 w-20 rounded-md" />
+          </div>
+        </div>
+        <Card>
+          <CardContent className="p-6 space-y-3">
+            <div className="flex gap-2">
+              <Skeleton className="h-5 w-24 rounded-full" />
+              <Skeleton className="h-5 w-20 rounded-full" />
+            </div>
+            <Skeleton className="h-8 w-3/4 rounded" />
+            <Skeleton className="h-4 w-1/2 rounded" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6 space-y-3">
+            <Skeleton className="h-5 w-1/4 rounded" />
+            <Skeleton className="h-4 w-full rounded" />
+            <Skeleton className="h-4 w-5/6 rounded" />
+            <Skeleton className="h-4 w-4/5 rounded" />
+          </CardContent>
+        </Card>
       </div>
     );
 
-  const analysis = analyzeSeo(b);
-  const blogActivity = (activity?.items || [])
-    .filter((a) => a.resource && a.resource.includes(b.title.slice(0, 20)))
-    .slice(0, 10);
-  const usedMedia = (media || []).filter((m) =>
-    (m.usedIn || []).some((u) => u.blogId === b.id),
+  const analysis = useMemo(() => (b ? analyzeSeo(b) : { checks: [] }), [b]);
+  const blogActivity = useMemo(() => {
+    if (!activity?.items || !b?.title) return [];
+    return activity.items
+      .filter((a) => a.resource && a.resource.includes(b.title.slice(0, 20)))
+      .slice(0, 10);
+  }, [activity?.items, b?.title]);
+  const usedMedia = useMemo(() => {
+    if (!media || !b?.id) return [];
+    return media.filter((m) =>
+      (m.usedIn || []).some((u) => u.blogId === b.id),
+    );
+  }, [media, b?.id]);
+  const imageCount = useMemo(() => {
+    let count = 0;
+    if (b?.featuredImage?.url) count++;
+    if (b?.contentHtml) {
+      const inlineMatches = b.contentHtml.match(/<img[^>]+src=["'][^"']+["']/gi);
+      if (inlineMatches) count += inlineMatches.length;
+    }
+    return count;
+  }, [b?.featuredImage?.url, b?.contentHtml]);
+  const hrefs = useMemo(() => {
+    if (!b?.contentHtml) return [];
+    return [...b.contentHtml.matchAll(/href\s*=\s*["']([^"']+)["']/gi)].map(
+      (m) => m[1],
+    );
+  }, [b?.contentHtml]);
+  const internalHrefs = useMemo(
+    () => hrefs.filter((h) => h.startsWith("/")),
+    [hrefs],
   );
-  const hrefs = [
-    ...(b.contentHtml || "").matchAll(/href\s*=\s*["']([^"']+)["']/gi),
-  ].map((m) => m[1]);
-  const internalHrefs = hrefs.filter((h) => h.startsWith("/"));
-  const externalHrefs = hrefs.filter((h) => /^https?:\/\//.test(h));
+  const externalHrefs = useMemo(
+    () => hrefs.filter((h) => /^https?:\/\//.test(h)),
+    [hrefs],
+  );
 
   const metrics = [
     {
@@ -177,6 +239,14 @@ export default function BlogDetail({ blogId, navigate, can }) {
               <Badge variant="outline" className="text-[11px] font-normal">
                 {b.category}
               </Badge>
+              {b.translations && Object.keys(b.translations).length > 0 && (
+                <Badge
+                  variant="outline"
+                  className="text-[11px] font-medium gap-1 bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300"
+                >
+                  <Globe className="h-3 w-3" /> {Object.keys(b.translations).length + 1} Languages Live
+                </Badge>
+              )}
               {b.status === "published" && thisBlogIndex && (
                 <Badge
                   variant="outline"
@@ -414,7 +484,10 @@ export default function BlogDetail({ blogId, navigate, can }) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => navigate("editor", { id: b.id })}
+                onClick={() => {
+                  if (b) swrMutate("/api/blogs/" + b.id, b, false);
+                  navigate("editor", { id: b.id });
+                }}
               >
                 <Pencil className="h-3.5 w-3.5 mr-1" />
                 Edit
@@ -437,7 +510,10 @@ export default function BlogDetail({ blogId, navigate, can }) {
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem
-                    onClick={() => navigate("editor", { id: b.id })}
+                    onClick={() => {
+                      if (b) swrMutate("/api/blogs/" + b.id, b, false);
+                      navigate("editor", { id: b.id });
+                    }}
                   >
                     <Eye className="h-4 w-4 mr-2" />
                     Preview in editor
@@ -651,46 +727,166 @@ export default function BlogDetail({ blogId, navigate, can }) {
           />
         )}
 
-      <Tabs defaultValue="content">
-        <TabsList className="h-9 justify-start overflow-x-auto w-full bg-muted/60 p-1">
-          <TabsTrigger value="content" className="text-xs px-3 h-7">
-            Content
-          </TabsTrigger>
-          <TabsTrigger value="seo" className="text-xs px-3 h-7">
-            SEO Information
-          </TabsTrigger>
-          <TabsTrigger value="analytics" className="text-xs px-3 h-7">
-            Analytics
-          </TabsTrigger>
-          <TabsTrigger value="images" className="text-xs px-3 h-7">
-            Images ({usedMedia.length})
-          </TabsTrigger>
-          <TabsTrigger value="links" className="text-xs px-3 h-7">
-            Internal Links ({internalHrefs.length})
-          </TabsTrigger>
-          <TabsTrigger value="activity" className="text-xs px-3 h-7">
-            Activity
-          </TabsTrigger>
-        </TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <TabsList className="h-9 justify-start overflow-x-auto bg-muted/60 p-1">
+            <TabsTrigger value="content" className="text-xs px-3 h-7">
+              Content
+            </TabsTrigger>
+            <TabsTrigger value="seo" className="text-xs px-3 h-7">
+              SEO Information
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="text-xs px-3 h-7">
+              Analytics
+            </TabsTrigger>
+            <TabsTrigger value="images" className="text-xs px-3 h-7">
+              Images ({imageCount})
+            </TabsTrigger>
+            <TabsTrigger value="links" className="text-xs px-3 h-7">
+              Internal Links ({internalHrefs.length})
+            </TabsTrigger>
+            <TabsTrigger value="activity" className="text-xs px-3 h-7">
+              Activity {activity ? `(${blogActivity.length})` : ""}
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Sleek Compact Language Switcher Dropdown in Tabs Header Row */}
+          {b.translations && Object.keys(b.translations).length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-2 text-xs font-semibold rounded-xl border-border/80 bg-background/80 hover:bg-muted/80 shadow-2xs"
+                >
+                  <Globe className="h-3.5 w-3.5 text-violet-600" />
+                  <span>
+                    Preview:{" "}
+                    <span className="text-violet-600 font-bold">
+                      {[
+                        { code: "en", label: "English" },
+                        { code: "hi", label: "हिंदी" },
+                        { code: "mr", label: "मराठी" },
+                        { code: "gu", label: "ગુજરાતી" },
+                        { code: "ta", label: "தமிழ்" },
+                        { code: "te", label: "తెలుగు" },
+                        { code: "kn", label: "ಕನ್ನಡ" },
+                        { code: "bn", label: "বাংলা" },
+                      ].find((l) => l.code === previewLang)?.label || "English"}
+                    </span>
+                  </span>
+                  <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52 p-1.5 rounded-xl shadow-lg">
+                <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground border-b border-border/50 mb-1">
+                  Select Preview Language
+                </div>
+                {[
+                  { code: "en", label: "English", sub: "Default" },
+                  { code: "hi", label: "हिंदी", sub: "Hindi" },
+                  { code: "mr", label: "मराठी", sub: "Marathi" },
+                  { code: "gu", label: "ગુજરાતી", sub: "Gujarati" },
+                  { code: "ta", label: "தமிழ்", sub: "Tamil" },
+                  { code: "te", label: "తెలుగు", sub: "Telugu" },
+                  { code: "kn", label: "ಕನ್ನಡ", sub: "Kannada" },
+                  { code: "bn", label: "বাংলা", sub: "Bengali" },
+                ]
+                  .filter((l) => l.code === "en" || b.translations?.[l.code])
+                  .map((l) => {
+                    const isActive = previewLang === l.code;
+                    return (
+                      <DropdownMenuItem
+                        key={l.code}
+                        onClick={() => setPreviewLang(l.code)}
+                        className={`flex items-center justify-between text-xs py-2 px-2.5 rounded-lg cursor-pointer ${
+                          isActive
+                            ? "bg-violet-50 text-violet-700 font-bold dark:bg-violet-950/40 dark:text-violet-300"
+                            : ""
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span>{l.label}</span>
+                          <span className="text-[11px] text-muted-foreground font-normal">
+                            ({l.sub})
+                          </span>
+                        </div>
+                        {isActive && (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-violet-600" />
+                        )}
+                      </DropdownMenuItem>
+                    );
+                  })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
 
         <TabsContent value="content" className="mt-4">
           <Card>
             <CardContent className="p-6 lg:p-8">
-              <div
-                className="prose-studio max-w-3xl"
-                dangerouslySetInnerHTML={{ __html: b.contentHtml }}
-                onClick={(e) => {
-                  const a = e.target.closest("a");
-                  if (!a) return;
-                  const href = a.getAttribute("href");
-                  if (!href) return;
-                  e.preventDefault();
-                  const targetUrl = href.startsWith("http")
-                    ? href
-                    : getVinimayUrl(href);
-                  window.open(targetUrl, "_blank", "noopener,noreferrer");
-                }}
-              />
+
+              {previewLang !== "en" && b.translations?.[previewLang]?.title && (
+                <div className="mb-6 pb-3 border-b border-muted">
+                  <h2 className="text-xl font-bold tracking-tight text-foreground">
+                    {b.translations[previewLang].title}
+                  </h2>
+                  {b.translations[previewLang].excerpt && (
+                    <p className="text-sm text-muted-foreground mt-1.5">
+                      {b.translations[previewLang].excerpt}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {b.contentHtml ? (
+                <div
+                  className="prose-studio max-w-3xl"
+                  dangerouslySetInnerHTML={{
+                    __html:
+                      previewLang !== "en" &&
+                      b.translations?.[previewLang]?.contentHtml
+                        ? b.translations[previewLang].contentHtml
+                        : b.contentHtml,
+                  }}
+                  onClick={(e) => {
+                    const a = e.target.closest("a");
+                    if (!a) return;
+                    const href = a.getAttribute("href");
+                    if (!href) return;
+                    e.preventDefault();
+                    const targetUrl = href.startsWith("http")
+                      ? href
+                      : getVinimayUrl(href);
+                    window.open(targetUrl, "_blank", "noopener,noreferrer");
+                  }}
+                />
+              ) : (
+                <div className="space-y-4 max-w-3xl py-2 animate-fade-in">
+                  {b.excerpt ? (
+                    <div className="space-y-3">
+                      <p className="text-base text-foreground/80 leading-relaxed font-normal">
+                        {b.excerpt}
+                      </p>
+                      <div className="space-y-2.5 pt-2">
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-5/6" />
+                        <Skeleton className="h-4 w-4/5" />
+                        <Skeleton className="h-24 w-full rounded-xl" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <Skeleton className="h-6 w-3/4" />
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-5/6" />
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-28 w-full rounded-xl" />
+                      <Skeleton className="h-4 w-4/5" />
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -806,7 +1002,13 @@ export default function BlogDetail({ blogId, navigate, can }) {
         </TabsContent>
 
         <TabsContent value="images" className="mt-4">
-          {usedMedia.length === 0 ? (
+          {!media ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-44 rounded-xl" />
+              ))}
+            </div>
+          ) : usedMedia.length === 0 ? (
             <Card>
               <CardContent>
                 <EmptyState
@@ -918,7 +1120,13 @@ export default function BlogDetail({ blogId, navigate, can }) {
         <TabsContent value="activity" className="mt-4">
           <Card>
             <CardContent className="p-4 space-y-3">
-              {blogActivity.length ? (
+              {!activity ? (
+                <div className="space-y-3 py-2">
+                  <Skeleton className="h-5 w-3/4" />
+                  <Skeleton className="h-5 w-1/2" />
+                  <Skeleton className="h-5 w-2/3" />
+                </div>
+              ) : blogActivity.length ? (
                 blogActivity.map((a) => (
                   <div key={a.id} className="flex items-center gap-3">
                     <ActivityIcon className="h-4 w-4 text-muted-foreground" />

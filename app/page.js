@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 import {
   Search,
   Home,
@@ -106,6 +106,11 @@ export default function App() {
       statsMutate();
       issuesMutate();
       notifMutate();
+      mutate(
+        (key) =>
+          typeof key === "string" &&
+          (key.startsWith("/api/blogs") || key.startsWith("/api/analytics")),
+      );
     };
     window.addEventListener("ss-refresh", h);
     return () => window.removeEventListener("ss-refresh", h);
@@ -560,7 +565,10 @@ function SearchDialog({ open, onOpenChange, q, setQ, navigate }) {
           id: b.id,
           title: b.title,
           sub: b.status,
-          go: () => navigate("blog", { id: b.id }),
+          go: () => {
+            mutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+            navigate("blog", { id: b.id });
+          },
         })),
       },
       {

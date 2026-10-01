@@ -374,10 +374,14 @@ export default function BlogEditor({
   const fileMode = useRef("content");
 
   const { data: team } = useSWR("/api/team", fetcher);
-  const { data: allBlogs } = useSWR("/api/blogs?limit=100", fetcher);
+  const { data: allBlogs } = useSWR("/api/blogs?limit=2000&fields=calendar", fetcher);
   const { data: keywords } = useSWR("/api/keywords", fetcher);
   const { data: contentOptions, mutate: mutateContentOptions } = useSWR(
     "/api/content-options",
+    fetcher,
+  );
+  const { data: blogDoc, error: blogDocError } = useSWR(
+    id ? "/api/blogs/" + id : null,
     fetcher,
   );
   const categories = useMemo(() => {
@@ -507,40 +511,53 @@ export default function BlogEditor({
       justCreatedRef.current = false;
       return;
     }
-    setLoading(true);
-    api("/blogs/" + id)
-      .then((b) => {
-        setForm({
-          title: b.title || "",
-          slug: b.slug || "",
-          slugEdited: true,
-          category: b.category || "",
-          subcategory: b.subcategory || "",
-          author: b.author || "",
-          tags: b.tags || [],
-          featuredImage: b.featuredImage || {
-            url: "",
-            alt: "",
-            title: "",
-            caption: "",
-          },
-          contentHtml: b.contentHtml || "",
-          seo: Object.assign(emptyForm().seo, b.seo || {}),
-          brief: Object.assign(emptyForm().brief, b.brief || {}),
-          savedSuggestions: b.savedSuggestions || [],
-          status: b.status,
-          scheduledAt: b.scheduledAt,
-          publishedAt: b.publishedAt,
-          reviewFeedback: b.reviewFeedback || null,
-        });
-        setLastSaved(b.updatedAt);
-        setDirty(false);
-        setHasChanges(false);
-      })
-      .catch(() => toast.error("Could not load this blog"))
-      .finally(() => setLoading(false));
+    if (blogDoc) {
+      setForm({
+        title: blogDoc.title || "",
+        slug: blogDoc.slug || "",
+        slugEdited: true,
+        category: blogDoc.category || "",
+        subcategory: blogDoc.subcategory || "",
+        author: blogDoc.author || "",
+        tags: blogDoc.tags || [],
+        featuredImage: blogDoc.featuredImage || {
+          url: "",
+          alt: "",
+          title: "",
+          caption: "",
+        },
+        contentHtml: blogDoc.contentHtml || "",
+        seo: Object.assign(emptyForm().seo, blogDoc.seo || {}),
+        brief: Object.assign(emptyForm().brief, blogDoc.brief || {}),
+        savedSuggestions: blogDoc.savedSuggestions || [],
+        status: blogDoc.status,
+        scheduledAt: blogDoc.scheduledAt,
+        publishedAt: blogDoc.publishedAt,
+        reviewFeedback: blogDoc.reviewFeedback || null,
+      });
+      if (editorRef.current && blogDoc.contentHtml) {
+        const cur = editorRef.current.innerHTML;
+        if (
+          !cur ||
+          cur.trim() === "" ||
+          cur === "<p><br></p>" ||
+          editorRef.current.dataset.loadedBlogId !== blogDoc.id
+        ) {
+          editorRef.current.innerHTML = blogDoc.contentHtml;
+          editorRef.current.dataset.loadedBlogId = blogDoc.id;
+          editorRef.current.dataset.init = "1";
+        }
+      }
+      setLastSaved(blogDoc.updatedAt);
+      setDirty(false);
+      setHasChanges(false);
+      setLoading(false);
+    } else if (blogDocError) {
+      toast.error("Could not load this blog");
+      setLoading(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, blogDoc, blogDocError]);
 
   // Check for unsaved local draft in browser localStorage
   useEffect(() => {
@@ -655,18 +672,23 @@ export default function BlogEditor({
     }
   }, [focus, loading]);
 
-  // Put initial HTML into the editor once loaded
+  // Put initial HTML into the editor once loaded, or whenever blog content arrives
   useEffect(() => {
-    if (
-      !loading &&
-      editorRef.current &&
-      editorRef.current.dataset.init !== "1"
-    ) {
-      editorRef.current.innerHTML = form.contentHtml || "";
+    if (!editorRef.current) return;
+    const currentHtml = editorRef.current.innerHTML;
+    const isEmpty =
+      !currentHtml ||
+      currentHtml.trim() === "" ||
+      currentHtml === "<p><br></p>";
+    const isNewBlogId =
+      editorRef.current.dataset.loadedBlogId !== (id || "new");
+
+    if (form.contentHtml && (isNewBlogId || isEmpty)) {
+      editorRef.current.innerHTML = form.contentHtml;
+      editorRef.current.dataset.loadedBlogId = id || "new";
       editorRef.current.dataset.init = "1";
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+  }, [form.contentHtml, id, loading]);
 
   const publishedSlugs = useMemo(
     () =>
@@ -2474,12 +2496,24 @@ export default function BlogEditor({
     };
   }, []);
 
-  if (loading) {
+  if (loading && !form.title) {
     return (
-      <div className="p-6 space-y-4 max-w-[1200px] mx-auto">
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-64 w-full" />
-        <Skeleton className="h-40 w-full" />
+      <div className="min-h-screen bg-background animate-fade-up">
+        <div className="border-b border-border bg-background/85 px-4 lg:px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-9 w-9 rounded-md" />
+            <Skeleton className="h-5 w-56 rounded" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-8 w-20 rounded-md" />
+            <Skeleton className="h-8 w-20 rounded-md" />
+          </div>
+        </div>
+        <div className="p-6 space-y-4 max-w-[1200px] mx-auto">
+          <Skeleton className="h-10 w-full rounded-xl" />
+          <Skeleton className="h-64 w-full rounded-xl" />
+          <Skeleton className="h-36 w-full rounded-xl" />
+        </div>
       </div>
     );
   }
@@ -2572,6 +2606,14 @@ export default function BlogEditor({
               >
                 {statusMeta.label}
               </Badge>
+              {form.translations && Object.keys(form.translations).length > 0 && (
+                <Badge
+                  variant="outline"
+                  className="text-[11px] font-medium gap-1 bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300"
+                >
+                  <Globe className="h-3 w-3" /> {Object.keys(form.translations).length + 1} Languages Live
+                </Badge>
+              )}
               {form.status === "scheduled" && form.scheduledAt && (
                 <span className="text-[11px] font-medium text-violet-600 dark:text-violet-400 flex items-center gap-1">
                   <Clock className="h-3 w-3" />

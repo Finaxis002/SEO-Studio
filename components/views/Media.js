@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import useSWR from "swr";
+import useSWR, { mutate as swrMutate } from "swr";
 import { toast } from "sonner";
 import {
   Search,
@@ -51,22 +51,14 @@ export default function Media({ navigate, can, initialUpload }) {
   const [newFolder, setNewFolder] = useState("");
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [displayCount, setDisplayCount] = useState(36);
+  const [loadingMore, setLoadingMore] = useState(false);
   const fileRef = useRef(null);
   const replaceRef = useRef(null);
+  const loadMoreRef = useRef(null);
 
-  const {
-    data: media,
-    error,
-    mutate,
-  } = useSWR(
-    "/api/media?q=" +
-      encodeURIComponent(q) +
-      "&type=" +
-      type +
-      (folder ? "&folder=" + encodeURIComponent(folder) : ""),
-    fetcher,
-  );
-  const { data: allMedia } = useSWR("/api/media", fetcher);
+  const { data: allMedia, error, mutate } = useSWR("/api/media", fetcher);
+
   const [extraFolders, setExtraFolders] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("ss_folders") || "[]");
@@ -85,6 +77,61 @@ export default function Media({ navigate, can, initialUpload }) {
     });
     return Object.entries(map).map(([name, count]) => ({ name, count }));
   }, [allMedia, extraFolders]);
+
+  const filteredMedia = useMemo(() => {
+    if (!allMedia) return null;
+    return allMedia.filter((m) => {
+      if (type !== "all" && m.type !== type) return false;
+      if (folder && m.folder !== folder) return false;
+      if (q.trim()) {
+        const query = q.toLowerCase();
+        const matchName = (m.name || "").toLowerCase().includes(query);
+        const matchAlt = (m.alt || "").toLowerCase().includes(query);
+        if (!matchName && !matchAlt) return false;
+      }
+      return true;
+    });
+  }, [allMedia, q, type, folder]);
+
+  const visibleMedia = useMemo(() => {
+    if (!filteredMedia) return null;
+    return filteredMedia.slice(0, displayCount);
+  }, [filteredMedia, displayCount]);
+
+  // Reset display count when active filters change
+  useEffect(() => {
+    setDisplayCount(36);
+  }, [q, type, folder]);
+
+  // Infinite scroll observer: load next batch when scrolling near bottom
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && filteredMedia && filteredMedia.length > displayCount) {
+          setLoadingMore(true);
+          setTimeout(() => {
+            setDisplayCount((prev) => prev + 24);
+            setLoadingMore(false);
+          }, 150);
+        }
+      },
+      { rootMargin: "300px", threshold: 0.1 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [filteredMedia, displayCount]);
+
+  function getThumbnailUrl(url) {
+    if (!url || typeof url !== "string") return url;
+    if (url.includes("res.cloudinary.com") && url.includes("/image/upload/")) {
+      return url.replace("/image/upload/", "/image/upload/w_400,c_fill,q_auto,f_auto/");
+    }
+    return url;
+  }
 
   // Open upload dialog automatically when arriving via "Upload Images" nav
   useEffect(() => {
@@ -243,8 +290,8 @@ export default function Media({ navigate, can, initialUpload }) {
               <span className="text-violet-600 font-medium">
                 Drop files to upload…
               </span>
-            ) : media ? (
-              media.length + " files · " + folders.length + " folders"
+            ) : filteredMedia ? (
+              filteredMedia.length + " files · " + folders.length + " folders"
             ) : (
               "Loading…"
             )}
@@ -368,13 +415,13 @@ export default function Media({ navigate, can, initialUpload }) {
             />
           </CardContent>
         </Card>
-      ) : !media ? (
+      ) : !filteredMedia ? (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
           {Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} className="h-52 rounded-xl" />
           ))}
         </div>
-      ) : media.length === 0 ? (
+      ) : filteredMedia.length === 0 ? (
         <Card>
           <CardContent>
             <EmptyState
@@ -393,23 +440,24 @@ export default function Media({ navigate, can, initialUpload }) {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-          {media.map((m) => {
-            const Icon = typeIcon(m.type);
-            return (
-              <Card
-                key={m.id}
-                className="card-hover overflow-hidden group cursor-pointer"
-                onClick={() => setSelected(m)}
-              >
-                <div className="relative h-40 bg-muted">
-                  {m.type === "image" ? (
-                    <img
-                      src={m.url}
-                      alt={m.alt || m.name}
-                      loading="lazy"
-                      className="h-full w-full object-cover group-hover:scale-[1.04] transition-transform duration-300"
-                    />
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+            {visibleMedia.map((m) => {
+              const Icon = typeIcon(m.type);
+              return (
+                <Card
+                  key={m.id}
+                  className="card-hover overflow-hidden group cursor-pointer"
+                  onClick={() => setSelected(m)}
+                >
+                  <div className="relative h-40 bg-muted">
+                    {m.type === "image" ? (
+                      <img
+                        src={getThumbnailUrl(m.url)}
+                        alt={m.alt || m.name}
+                        loading="lazy"
+                        className="h-full w-full object-cover group-hover:scale-[1.04] transition-transform duration-300"
+                      />
                   ) : (
                     <div className="h-full flex items-center justify-center">
                       <Icon className="h-10 w-10 text-muted-foreground" />
@@ -499,7 +547,24 @@ export default function Media({ navigate, can, initialUpload }) {
             );
           })}
         </div>
-      )}
+
+        {filteredMedia.length > displayCount && (
+          <div
+            ref={loadMoreRef}
+            className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground"
+          >
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <span className="text-xs text-muted-foreground font-medium">Loading more media...</span>
+          </div>
+        )}
+
+        {filteredMedia.length > 36 && filteredMedia.length <= displayCount && (
+          <div className="text-center py-8 text-xs text-muted-foreground/80 font-medium">
+            ✨ All {filteredMedia.length} media items loaded
+          </div>
+        )}
+      </div>
+    )}
 
       {/* Details drawer */}
       <Sheet open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
@@ -737,7 +802,10 @@ function MediaDrawer({
             {m.usedIn.map((u, i) => (
               <button
                 key={i}
-                onClick={() => navigate("blog", { id: u.blogId })}
+                onClick={() => {
+                  swrMutate("/api/blogs/" + u.blogId, (prev) => prev || { id: u.blogId, title: u.title }, false);
+                  navigate("blog", { id: u.blogId });
+                }}
                 className="w-full flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-left hover:bg-accent transition-colors"
               >
                 <FileText className="h-3.5 w-3.5 text-violet-500" />

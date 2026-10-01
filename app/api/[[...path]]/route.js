@@ -5,7 +5,7 @@ import path from "path";
 import sharp from "sharp";
 import { getDb, clean } from "../../../lib/db";
 import { ensureSeeded } from "../../../lib/seed";
-import { analyzeSeo, slugify, normalizeHtmlContent } from "../../../lib/seo";
+import { analyzeSeo, computeSeoAudit, slugify, normalizeHtmlContent } from "../../../lib/seo";
 import {
   generateOutline,
   generateSeoMeta,
@@ -17,6 +17,7 @@ import {
   getGoogleIndexing,
 } from "../../../lib/google-analytics";
 import { deleteAsset, uploadBuffer } from "../../../lib/cloudinary";
+import { translateBlog, DEFAULT_TARGET_LANGS } from "../../../lib/blog-translator";
 import {
   clearSessionCookie,
   createSession,
@@ -57,22 +58,104 @@ export async function OPTIONS(request) {
   return handleCORS(new NextResponse(null, { status: 200 }), request);
 }
 
+// Server-side in-memory cache for high-frequency dashboard/read endpoints
+const serverCache = {
+  stats: { data: null, time: 0 },
+  seoIssues: { data: null, time: 0 },
+  team: { data: null, time: 0 },
+  roles: { data: null, time: 0 },
+  contentOptions: { data: null, time: 0 },
+  keywords: { data: null, time: 0 },
+  blogMeta: { data: null, time: 0 },
+  calendar: {},
+  analytics: {},
+};
+
+const userSessionCache = new Map();
+const USER_CACHE_TTL = 30000; // 30s
+
+const rolePermsCache = new Map();
+const ROLE_CACHE_TTL = 60000; // 60s
+
+let pubSettingsCache = null;
+let pubSettingsCacheTime = 0;
+const SETTINGS_CACHE_TTL = 30000; // 30s
+
+let lastSchedulerCheck = 0;
+const SCHEDULER_INTERVAL = 10000; // 10s
+
+const singleBlogCache = new Map();
+const MAX_BLOG_CACHE_ITEMS = 30; // Strictly max 30 items in RAM (~750 KB) — zero RAM spike risk
+const SINGLE_BLOG_CACHE_TTL = 60000; // 60s auto-expiry
+
+function invalidateCache(...keys) {
+  if (!keys.length) {
+    serverCache.stats = { data: null, time: 0 };
+    serverCache.seoIssues = { data: null, time: 0 };
+    serverCache.team = { data: null, time: 0 };
+    serverCache.roles = { data: null, time: 0 };
+    serverCache.contentOptions = { data: null, time: 0 };
+    serverCache.keywords = { data: null, time: 0 };
+    serverCache.blogMeta = { data: null, time: 0 };
+    serverCache.calendar = {};
+    serverCache.analytics = {};
+    userSessionCache.clear();
+    rolePermsCache.clear();
+    pubSettingsCache = null;
+    pubSettingsCacheTime = 0;
+    singleBlogCache.clear();
+    mediaCache = null;
+    mediaCacheTime = 0;
+    return;
+  }
+  keys.forEach((k) => {
+    if (k === "analytics") serverCache.analytics = {};
+    else if (k === "media") {
+      mediaCache = null;
+      mediaCacheTime = 0;
+    } else if (k === "team") {
+      if (serverCache.team) serverCache.team = { data: null, time: 0 };
+      userSessionCache.clear();
+    } else if (k === "roles") {
+      if (serverCache.roles) serverCache.roles = { data: null, time: 0 };
+      rolePermsCache.clear();
+    } else if (k === "settings") {
+      pubSettingsCache = null;
+      pubSettingsCacheTime = 0;
+    } else if (k === "calendar") {
+      serverCache.calendar = {};
+    } else if (k === "blogs") {
+      singleBlogCache.clear();
+      serverCache.calendar = {};
+      if (serverCache.blogs) serverCache.blogs = { data: null, time: 0 };
+    } else if (serverCache[k]) serverCache[k] = { data: null, time: 0 };
+  });
+}
+
+let googleApiCooldownUntil = 0;
+
 function esc(s) {
   return (s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function getUser(request, db) {
   const uid = getSessionUserId(request);
-  if (uid) {
-    const u = await db.collection("team").findOne({ id: uid });
-    if (u)
-      return {
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        role: u.role,
-        status: u.status,
-      };
+  if (!uid) return null;
+  const cached = userSessionCache.get(uid);
+  if (cached && Date.now() - cached.time < USER_CACHE_TTL) {
+    return cached.user;
+  }
+  const u = await db.collection("team").findOne({ id: uid });
+  if (u) {
+    const userObj = {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      status: u.status,
+    };
+    userSessionCache.set(uid, { user: userObj, time: Date.now() });
+    return userObj;
   }
   return null;
 }
@@ -84,9 +167,15 @@ function publicMember(member) {
 }
 
 async function getPerms(db, user) {
+  if (!user?.role) return [];
+  const cached = rolePermsCache.get(user.role);
+  if (cached && Date.now() - cached.time < ROLE_CACHE_TTL) {
+    return cached.perms;
+  }
   const role = await db.collection("roles").findOne({ name: user.role });
-  if (!role) return [];
-  return role.permissions || [];
+  const perms = role ? role.permissions || [] : [];
+  rolePermsCache.set(user.role, { perms, time: Date.now() });
+  return perms;
 }
 
 function forbidden(msg) {
@@ -318,11 +407,15 @@ function newBlogDoc(body, user) {
 }
 
 async function publishingSettings(db) {
-  return (
-    (await db.collection("settings").findOne({ id: "app-settings" })) || {
-      publishing: {},
-    }
-  );
+  if (pubSettingsCache && Date.now() - pubSettingsCacheTime < SETTINGS_CACHE_TTL) {
+    return pubSettingsCache;
+  }
+  const s = (await db.collection("settings").findOne({ id: "app-settings" })) || {
+    publishing: {},
+  };
+  pubSettingsCache = s;
+  pubSettingsCacheTime = Date.now();
+  return s;
 }
 
 async function checkAndPublishScheduled(db) {
@@ -330,54 +423,67 @@ async function checkAndPublishScheduled(db) {
     const settings = await publishingSettings(db);
     if (settings.publishing?.autoPublishScheduled !== false) {
       const now = new Date().toISOString();
+      // Cap at 100 per scheduler run — prevents blocking the request for 1000+ blogs.
+      // Remaining blogs will be published on the next request cycle.
       const scheduledBlogs = await db
         .collection("blogs")
-        .find({
-          status: "scheduled",
-          scheduledAt: { $lte: now },
-        })
+        .find(
+          { status: "scheduled", scheduledAt: { $lte: now } },
+          { projection: { id: 1, title: 1 } },
+        )
+        .limit(100)
         .toArray();
 
-      for (const blog of scheduledBlogs) {
-        const updateResult = await db.collection("blogs").updateOne(
-          { id: blog.id, status: "scheduled" },
-          {
-            $set: {
-              status: "published",
-              publishedAt: now,
-              updatedAt: now,
-            },
-          },
-        );
+      if (scheduledBlogs.length === 0) return;
 
-        if (updateResult.modifiedCount === 0) continue;
+      // Publish all due blogs in one bulk operation instead of sequential updateOne calls
+      const bulkOps = scheduledBlogs.map((blog) => ({
+        updateOne: {
+          filter: { id: blog.id, status: "scheduled" },
+          update: { $set: { status: "published", publishedAt: now, updatedAt: now } },
+        },
+      }));
+      const bulkResult = await db.collection("blogs").bulkWrite(bulkOps, { ordered: false });
+      const publishedCount = bulkResult.modifiedCount;
 
-        await notify(
-          db,
-          "publish",
-          "Scheduled blog auto-published",
-          `"${blog.title}" has reached its scheduled time and is now live.`,
-        );
-        await db.collection("activity").insertOne({
-          id: uuidv4(),
-          user: "System Scheduler",
-          userId: "system",
-          userRole: "Super Admin",
-          action: "published",
-          resourceType: "blog",
-          resource: blog.title,
-          details: "Auto-published at scheduled time",
-          status: "success",
-          ip: "127.0.0.1",
-          device: "Server Process",
-          createdAt: now,
-        });
+      if (publishedCount > 0) {
+        // Batch all notifications and activity logs in parallel — not sequential awaits
+        await Promise.all([
+          ...scheduledBlogs.slice(0, publishedCount).map((blog) =>
+            notify(
+              db,
+              "publish",
+              "Scheduled blog auto-published",
+              `"${blog.title}" has reached its scheduled time and is now live.`,
+            ).catch(() => {}),
+          ),
+          db.collection("activity").insertMany(
+            scheduledBlogs.slice(0, publishedCount).map((blog) => ({
+              id: uuidv4(),
+              user: "System Scheduler",
+              userId: "system",
+              userRole: "Super Admin",
+              action: "published",
+              resourceType: "blog",
+              resource: blog.title,
+              details: "Auto-published at scheduled time",
+              status: "success",
+              ip: "127.0.0.1",
+              device: "Server Process",
+              createdAt: now,
+            })),
+          ).catch(() => {}),
+        ]);
+        invalidateCache("stats", "seoIssues", "analytics", "blogMeta", "calendar");
       }
     }
   } catch (err) {
     console.error("Scheduled publishing check error:", err);
   }
 }
+
+let mediaCache = null;
+let mediaCacheTime = 0;
 
 let lastCleanupTime = 0;
 async function cleanupOldLogsAndNotifications(db) {
@@ -437,7 +543,10 @@ async function handleRoute(request, { params }) {
   try {
     db = await getDb();
     await ensureSeeded(db);
-    await checkAndPublishScheduled(db);
+    if (Date.now() - lastSchedulerCheck >= SCHEDULER_INTERVAL) {
+      lastSchedulerCheck = Date.now();
+      await checkAndPublishScheduled(db);
+    }
     cleanupOldLogsAndNotifications(db).catch(() => {});
   } catch (e) {
     console.error("DB connection error:", e);
@@ -686,15 +795,41 @@ async function handleRoute(request, { params }) {
         filter.tags = { $in: [new RegExp("^" + esc(tag) + "$", "i")] };
       }
 
-      const total = await db.collection("blogs").countDocuments(filter);
-      const rawItems = await db
-        .collection("blogs")
-        .find(filter)
-        .project({ contentHtml: 0, savedSuggestions: 0, brief: 0 })
-        .sort({ publishedAt: -1, updatedAt: -1, createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .toArray();
+      const [total, rawItems, categoriesAgg] = await Promise.all([
+        db.collection("blogs").countDocuments(filter),
+        db
+          .collection("blogs")
+          .find(filter)
+          .project({
+            contentHtml: 0,
+            savedSuggestions: 0,
+            brief: 0,
+            "translations.hi.contentHtml": 0,
+            "translations.mr.contentHtml": 0,
+            "translations.gu.contentHtml": 0,
+            "translations.ta.contentHtml": 0,
+            "translations.te.contentHtml": 0,
+            "translations.kn.contentHtml": 0,
+            "translations.bn.contentHtml": 0,
+          })
+          .sort({ publishedAt: -1, updatedAt: -1, createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray(),
+        db
+          .collection("blogs")
+          .aggregate([
+            {
+              $match: {
+                status: "published",
+                category: { $exists: true, $ne: "" },
+              },
+            },
+            { $group: { _id: "$category", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+          ])
+          .toArray(),
+      ]);
 
       const items = rawItems.map((b) => {
         const cleaned = clean(b);
@@ -730,32 +865,21 @@ async function handleRoute(request, { params }) {
         };
       });
 
-      const categoriesAgg = await db
-        .collection("blogs")
-        .aggregate([
-          {
-            $match: {
-              status: "published",
-              category: { $exists: true, $ne: "" },
-            },
-          },
-          { $group: { _id: "$category", count: { $sum: 1 } } },
-          { $sort: { count: -1 } },
-        ])
-        .toArray();
-
-      return handleCORS(
-        NextResponse.json({
-          items,
-          total,
-          page,
-          pages: Math.ceil(total / limit) || 1,
-          categories: categoriesAgg.map((c) => ({
-            name: c._id,
-            count: c.count,
-          })),
-        }),
+      const response = NextResponse.json({
+        items,
+        total,
+        page,
+        pages: Math.ceil(total / limit) || 1,
+        categories: categoriesAgg.map((c) => ({
+          name: c._id,
+          count: c.count,
+        })),
+      });
+      response.headers.set(
+        "Cache-Control",
+        "public, s-maxage=60, stale-while-revalidate=300",
       );
+      return handleCORS(response, request);
     } catch (e) {
       console.error("Public blogs error:", e);
       return handleCORS(
@@ -791,11 +915,21 @@ async function handleRoute(request, { params }) {
       // Fetch related published articles
       const relatedRaw = await db
         .collection("blogs")
-        .find({
-          status: "published",
-          id: { $ne: blog.id },
-          ...(blog.category ? { category: blog.category } : {}),
-        })
+        .find(
+          {
+            status: "published",
+            id: { $ne: blog.id },
+            ...(blog.category ? { category: blog.category } : {}),
+          },
+          {
+            projection: {
+              contentHtml: 0,
+              translations: 0,
+              savedSuggestions: 0,
+              brief: 0,
+            },
+          }
+        )
         .sort({ publishedAt: -1, updatedAt: -1 })
         .limit(3)
         .toArray();
@@ -822,8 +956,7 @@ async function handleRoute(request, { params }) {
           ? cleanedBlog.contentHtml.split(/\s+/).length
           : 500);
 
-      return handleCORS(
-        NextResponse.json({
+      const response = NextResponse.json({
           blog: {
             ...cleanedBlog,
             excerpt:
@@ -842,8 +975,12 @@ async function handleRoute(request, { params }) {
             readingTime: Math.max(1, Math.ceil(words / 200)) + " min read",
           },
           related,
-        }),
-      );
+        });
+        response.headers.set(
+          "Cache-Control",
+          "public, s-maxage=60, stale-while-revalidate=300",
+        );
+        return handleCORS(response, request);
     } catch (e) {
       console.error("Public blog detail error:", e);
       return handleCORS(
@@ -1130,7 +1267,10 @@ async function handleRoute(request, { params }) {
 
     // ---------- STATS ----------
     if (route === "/stats" && method === "GET") {
-      if (process.env.GA4_PROPERTY_ID && process.env.GSC_SITE_URL) {
+      if (serverCache.stats.data && Date.now() - serverCache.stats.time < 30000) {
+        return handleCORS(NextResponse.json(serverCache.stats.data), request);
+      }
+      if (process.env.GA4_PROPERTY_ID && process.env.GSC_SITE_URL && Date.now() >= googleApiCooldownUntil) {
         try {
           const live = await getGoogleAnalytics(30);
           const contentBlogs = await db
@@ -1160,46 +1300,48 @@ async function handleRoute(request, { params }) {
           const liveRanking = live.topKeywords.filter(
             (keyword) => keyword.position > 0 && keyword.position <= 10,
           ).length;
-          return handleCORS(
-            NextResponse.json(
-              clean({
-                kpis: {
-                  totalBlogs: { value: contentBlogs.length, delta: 0 },
-                  published: { value: contentStatus.published, delta: 0 },
-                  drafts: {
-                    value: contentStatus.draft + contentStatus.in_review,
-                    delta: 0,
-                  },
-                  scheduled: { value: contentStatus.scheduled, delta: 0 },
-                  organicTraffic: {
-                    value: live.totals.organic,
-                    delta: live.deltas.organic,
-                  },
-                  seoScore: { value: contentScore, delta: 0 },
-                  keywordsRanking: { value: liveRanking, delta: 0 },
-                  totalViews: {
-                    value: live.totals.views,
-                    delta: live.deltas.views,
-                  },
-                },
-                statusCounts: contentStatus,
-                spark: {
-                  traffic: live.series.map((row) => row.organic),
-                  views: live.series.map((row) => row.views),
-                  score: [],
-                  keywords: live.topKeywords.map((keyword) =>
-                    Math.max(0, 100 - keyword.position * 4),
-                  ),
-                  engagement: live.series.map((row) => row.engagement),
-                },
-                source: "google",
-              }),
-            ),
-          );
+          const liveResult = clean({
+            kpis: {
+              totalBlogs: { value: contentBlogs.length, delta: 0 },
+              published: { value: contentStatus.published, delta: 0 },
+              drafts: {
+                value: contentStatus.draft + contentStatus.in_review,
+                delta: 0,
+              },
+              scheduled: { value: contentStatus.scheduled, delta: 0 },
+              organicTraffic: {
+                value: live.totals.organic,
+                delta: live.deltas.organic,
+              },
+              seoScore: { value: contentScore, delta: 0 },
+              keywordsRanking: { value: liveRanking, delta: 0 },
+              totalViews: {
+                value: live.totals.views,
+                delta: live.deltas.views,
+              },
+            },
+            statusCounts: contentStatus,
+            spark: {
+              traffic: live.series.map((row) => row.organic),
+              views: live.series.map((row) => row.views),
+              score: [],
+              keywords: live.topKeywords.map((keyword) =>
+                Math.max(0, 100 - keyword.position * 4),
+              ),
+              engagement: live.series.map((row) => row.engagement),
+            },
+            source: "google",
+          });
+          serverCache.stats = { data: liveResult, time: Date.now() };
+          return handleCORS(NextResponse.json(liveResult), request);
         } catch (error) {
+          googleApiCooldownUntil = Date.now() + 60000;
+          const cleanErrMsg = error.message?.includes("<!DOCTYPE")
+            ? "Google API temporarily unavailable (HTTP 502 Server Error). Cooling down for 60s."
+            : (error.message || "Unknown error").slice(0, 150);
           console.warn(
             "Google stats live call failed, falling back to database stats:",
-            error.message,
+            cleanErrMsg,
           );
         }
       }
@@ -1273,42 +1415,40 @@ async function handleRoute(request, { params }) {
         .slice(0, 8)
         .map((k) => Math.max(0, 100 - k.position * 4));
       const scoreSpark = Array.from({ length: 8 }, () => avgSeo);
-      return handleCORS(
-        NextResponse.json(
-          clean({
-            kpis: {
-              totalBlogs: {
-                value: totalBlogs,
-                delta: 0,
-              },
-              published: { value: statusCounts.published, delta: 0 },
-              drafts: {
-                value: statusCounts.draft + statusCounts.in_review,
-                delta: 0,
-              },
-              scheduled: { value: statusCounts.scheduled, delta: 0 },
-              organicTraffic: {
-                value: trafficCur,
-                delta: pct(trafficCur, trafficPrev),
-              },
-              seoScore: { value: avgSeo, delta: 0 },
-              keywordsRanking: {
-                value: ranking,
-                delta: 0,
-              },
-              totalViews: { value: viewsCur, delta: pct(viewsCur, viewsPrev) },
-            },
-            statusCounts,
-            spark: {
-              traffic: spark(daily, "organic", 14),
-              views: spark(daily, "views", 14),
-              score: scoreSpark,
-              keywords: kwSpark,
-              engagement: spark(daily, "engagement", 14),
-            },
-          }),
-        ),
-      );
+      const dbStatsResult = clean({
+        kpis: {
+          totalBlogs: {
+            value: totalBlogs,
+            delta: 0,
+          },
+          published: { value: statusCounts.published, delta: 0 },
+          drafts: {
+            value: statusCounts.draft + statusCounts.in_review,
+            delta: 0,
+          },
+          scheduled: { value: statusCounts.scheduled, delta: 0 },
+          organicTraffic: {
+            value: trafficCur,
+            delta: pct(trafficCur, trafficPrev),
+          },
+          seoScore: { value: avgSeo, delta: 0 },
+          keywordsRanking: {
+            value: ranking,
+            delta: 0,
+          },
+          totalViews: { value: viewsCur, delta: pct(viewsCur, viewsPrev) },
+        },
+        statusCounts,
+        spark: {
+          traffic: spark(daily, "organic", 14),
+          views: spark(daily, "views", 14),
+          score: scoreSpark,
+          keywords: kwSpark,
+          engagement: spark(daily, "engagement", 14),
+        },
+      });
+      serverCache.stats = { data: dbStatsResult, time: Date.now() };
+      return handleCORS(NextResponse.json(dbStatsResult), request);
     }
 
     function pct(cur, prev) {
@@ -1321,6 +1461,15 @@ async function handleRoute(request, { params }) {
       const sp = new URL(request.url).searchParams;
       const q = sp.get("q") || "";
       const status = sp.get("status") || "all";
+      const isCalendar = sp.get("fields") === "calendar" || (status === "scheduled,published" && !q && !sp.get("author") && !sp.get("category"));
+      const fromDate = sp.get("from");
+      const toDate = sp.get("to");
+      const calKey = fromDate && toDate ? `${fromDate}_${toDate}` : "all";
+
+      if (isCalendar && serverCache.calendar[calKey] && Date.now() - serverCache.calendar[calKey].time < 30000) {
+        return handleCORS(NextResponse.json(serverCache.calendar[calKey].data), request);
+      }
+
       const filter = {};
       if (status && status !== "all") {
         const list = status
@@ -1348,6 +1497,20 @@ async function handleRoute(request, { params }) {
         else if (band === "mid") filter["seo.score"] = { $gte: 60, $lt: 80 };
         else if (band === "low") filter["seo.score"] = { $lt: 60 };
       }
+      if (fromDate || toDate) {
+        const dateCond = {};
+        if (fromDate) dateCond.$gte = fromDate;
+        if (toDate) dateCond.$lte = toDate;
+        const dateOr = [
+          { scheduledAt: dateCond },
+          { publishedAt: dateCond },
+        ];
+        if (filter.$and) {
+          filter.$and.push({ $or: dateOr });
+        } else {
+          filter.$and = [{ $or: dateOr }];
+        }
+      }
       const sortMap = {
         newest: { updatedAt: -1 },
         oldest: { updatedAt: 1 },
@@ -1358,20 +1521,44 @@ async function handleRoute(request, { params }) {
       };
       const sort = sortMap[sp.get("sort")] || sortMap.newest;
       const page = Math.max(parseInt(sp.get("page") || "1", 10), 1);
-      const limit = Math.min(parseInt(sp.get("limit") || "10", 10), 100);
-      const total = await db.collection("blogs").countDocuments(filter);
-      const items = await db
-        .collection("blogs")
-        .find(filter)
-        .project({ contentHtml: 0, savedSuggestions: 0, brief: 0 })
-        .sort(sort)
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .toArray();
-      const countsAgg = await db
-        .collection("blogs")
-        .aggregate([{ $group: { _id: "$status", n: { $sum: 1 } } }])
-        .toArray();
+      const limit = Math.min(parseInt(sp.get("limit") || "10", 10), 5000);
+      let countsAgg = [];
+      let allCategories = [];
+      if (!isCalendar) {
+        if (serverCache.blogMeta.data && Date.now() - serverCache.blogMeta.time < 30000) {
+          countsAgg = serverCache.blogMeta.data.countsAgg;
+          allCategories = serverCache.blogMeta.data.allCategories;
+        } else {
+          [countsAgg, allCategories] = await Promise.all([
+            db.collection("blogs").aggregate([{ $group: { _id: "$status", n: { $sum: 1 } } }]).toArray(),
+            db.collection("blogs").distinct("category"),
+          ]);
+          serverCache.blogMeta = { data: { countsAgg, allCategories }, time: Date.now() };
+        }
+      }
+
+      const projection = isCalendar
+        ? { id: 1, title: 1, slug: 1, status: 1, scheduledAt: 1, publishedAt: 1 }
+        : limit <= 15
+          ? { savedSuggestions: 0, brief: 0, translations: 0 }
+          : {
+              contentHtml: 0,
+              savedSuggestions: 0,
+              brief: 0,
+              translations: 0,
+            };
+
+      const [total, items] = await Promise.all([
+        db.collection("blogs").countDocuments(filter),
+        db
+          .collection("blogs")
+          .find(filter)
+          .project(projection)
+          .sort(sort)
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .toArray(),
+      ]);
       const counts = {
         all: 0,
         draft: 0,
@@ -1385,21 +1572,22 @@ async function handleRoute(request, { params }) {
         counts[c._id] = c.n;
         counts.all += c.n;
       });
-      const allCategories = await db.collection("blogs").distinct("category");
-      return handleCORS(
-        NextResponse.json(
-          clean({
-            items,
-            total,
-            page,
-            pages: Math.ceil(total / limit) || 1,
-            counts,
-            categories: Array.from(
-              new Set(["General", ...allCategories.filter(Boolean)]),
-            ).sort(),
-          }),
-        ),
-      );
+      const responseData = clean({
+        items,
+        total,
+        page,
+        pages: Math.ceil(total / limit) || 1,
+        counts,
+        categories: isCalendar ? [] : Array.from(
+          new Set(["General", ...allCategories.filter(Boolean)]),
+        ).sort(),
+      });
+
+      if (isCalendar) {
+        serverCache.calendar[calKey] = { data: responseData, time: Date.now() };
+      }
+
+      return handleCORS(NextResponse.json(responseData), request);
     }
 
     if (route === "/blogs" && method === "POST") {
@@ -1427,6 +1615,7 @@ async function handleRoute(request, { params }) {
       const a = analyzeSeo(doc);
       doc.seo.score = a.score;
       doc.wordCount = a.stats.words;
+      doc.seoAudit = computeSeoAudit(doc.contentHtml);
       // Slug uniqueness check — block if another blog already uses this slug
       const slugConflict = await db
         .collection("blogs")
@@ -1442,6 +1631,7 @@ async function handleRoute(request, { params }) {
         );
       }
       await db.collection("blogs").insertOne(doc);
+      invalidateCache("stats", "seoIssues", "analytics", "blogMeta", "team", "calendar");
       await syncMediaUsage(db, doc);
       await recordActivity("created", "blog", doc.title);
       return handleCORS(NextResponse.json(clean(doc), { status: 201 }));
@@ -1476,8 +1666,35 @@ async function handleRoute(request, { params }) {
         },
       };
       await db.collection("blogs").insertOne(copy);
+      invalidateCache("stats", "seoIssues", "analytics", "blogMeta", "team", "calendar");
       await recordActivity("duplicated", "blog", copy.title);
       return handleCORS(NextResponse.json(clean(copy), { status: 201 }));
+    }
+
+    if (path[0] === "blogs" && path[2] === "translate" && method === "POST") {
+      if (!can("blogs.edit") && !can("blogs.create"))
+        return forbidden("Your role cannot edit blogs.");
+      const blog = await db.collection("blogs").findOne({ id: path[1] });
+      if (!blog)
+        return handleCORS(
+          NextResponse.json({ error: "Blog not found" }, { status: 404 }),
+        );
+      let body = {};
+      try {
+        body = await request.json();
+      } catch (err) {}
+      const targetLangs = body.languages || DEFAULT_TARGET_LANGS;
+      const translations = await translateBlog(blog, targetLangs);
+      await db.collection("blogs").updateOne(
+        { id: blog.id },
+        { $set: { translations, updatedAt: new Date().toISOString() } },
+      );
+      try {
+        await recordActivity("translated", "blog", blog.title);
+      } catch (err) {}
+      return handleCORS(
+        NextResponse.json({ success: true, translations, id: blog.id }),
+      );
     }
 
     if (path[0] === "blogs" && path[2] === "transition" && method === "POST") {
@@ -1597,6 +1814,7 @@ async function handleRoute(request, { params }) {
       }
       if (to === "archived") update.archivedAt = new Date().toISOString();
       await db.collection("blogs").updateOne({ id: blog.id }, { $set: update });
+      invalidateCache("stats", "seoIssues", "analytics", "blogMeta", "team", "calendar");
       const updated = { ...blog, ...update };
       await recordActivity(
         "changed_status",
@@ -1615,6 +1833,23 @@ async function handleRoute(request, { params }) {
             ? '"' + blog.title + '" changes are now live.'
             : '"' + blog.title + '" is now live on the website.',
         );
+      }
+      if (to === "published" || to === "scheduled") {
+        // Asynchronously auto-translate into 7 regional languages (Non-blocking)
+        (async () => {
+          try {
+            const currentDoc = await db.collection("blogs").findOne({ id: blog.id });
+            if (currentDoc) {
+              const translations = await translateBlog(currentDoc, DEFAULT_TARGET_LANGS);
+              await db.collection("blogs").updateOne(
+                { id: blog.id },
+                { $set: { translations } }
+              );
+            }
+          } catch (err) {
+            console.error("Auto-translation background task failed:", err);
+          }
+        })();
       }
       if (to === "scheduled")
         await notify(
@@ -1685,14 +1920,25 @@ async function handleRoute(request, { params }) {
     if (path[0] === "blogs" && path[1] && path.length === 2) {
       const id = path[1];
       if (method === "GET") {
+        const cached = singleBlogCache.get(id);
+        if (cached && Date.now() - cached.time < SINGLE_BLOG_CACHE_TTL) {
+          return handleCORS(NextResponse.json(cached.data), request);
+        }
         const blog = await db.collection("blogs").findOne({ id });
         if (!blog)
           return handleCORS(
             NextResponse.json({ error: "Blog not found" }, { status: 404 }),
           );
-        return handleCORS(NextResponse.json(clean(blog)));
+        const cleaned = clean(blog);
+        if (singleBlogCache.size >= MAX_BLOG_CACHE_ITEMS) {
+          const oldestKey = singleBlogCache.keys().next().value;
+          if (oldestKey) singleBlogCache.delete(oldestKey);
+        }
+        singleBlogCache.set(id, { data: cleaned, time: Date.now() });
+        return handleCORS(NextResponse.json(cleaned), request);
       }
       if (method === "PUT") {
+        singleBlogCache.delete(id);
         if (!can("blogs.edit"))
           return forbidden("Your role cannot edit blogs.");
         const existing = await db.collection("blogs").findOne({ id });
@@ -1752,6 +1998,8 @@ async function handleRoute(request, { params }) {
           update["seo.score"] = a.score;
         }
         update.wordCount = a.stats.words;
+        // Keep seoAudit in sync whenever contentHtml or seo fields change
+        update.seoAudit = computeSeoAudit(merged.contentHtml);
         // Slug uniqueness check — only if slug is actually being changed
         if (body.slug && body.slug !== existing.slug) {
           const slugConflict = await db
@@ -1772,10 +2020,28 @@ async function handleRoute(request, { params }) {
           }
         }
         await db.collection("blogs").updateOne({ id }, { $set: update });
+        invalidateCache("stats", "seoIssues", "analytics", "blogMeta", "team", "calendar");
         await syncMediaUsage(db, {
           ...merged,
           seo: { ...merged.seo, score: a.score },
         });
+
+        if (existing.status === "published") {
+          (async () => {
+            try {
+              const currentDoc = await db.collection("blogs").findOne({ id });
+              if (currentDoc) {
+                const translations = await translateBlog(currentDoc, DEFAULT_TARGET_LANGS);
+                await db.collection("blogs").updateOne(
+                  { id },
+                  { $set: { translations } }
+                );
+              }
+            } catch (err) {
+              console.error("Auto-translation re-sync on update failed:", err);
+            }
+          })();
+        }
         return handleCORS(
           NextResponse.json(
             clean({
@@ -1795,6 +2061,8 @@ async function handleRoute(request, { params }) {
             NextResponse.json({ error: "Blog not found" }, { status: 404 }),
           );
         await db.collection("blogs").deleteOne({ id });
+        singleBlogCache.delete(id);
+        invalidateCache("stats", "seoIssues", "analytics", "blogMeta", "team", "calendar");
         await db
           .collection("media")
           .updateMany(
@@ -1809,6 +2077,13 @@ async function handleRoute(request, { params }) {
     // ---------- MEDIA ----------
     if (route === "/media" && method === "GET") {
       const sp = new URL(request.url).searchParams;
+      const isUnfiltered =
+        !sp.get("q") &&
+        !sp.get("folder") &&
+        (!sp.get("type") || sp.get("type") === "all");
+      if (isUnfiltered && mediaCache && Date.now() - mediaCacheTime < 60000) {
+        return handleCORS(NextResponse.json(mediaCache), request);
+      }
       const filter = {};
       if (sp.get("q"))
         filter.$or = [
@@ -1823,7 +2098,12 @@ async function handleRoute(request, { params }) {
         .find(filter)
         .sort({ uploadedAt: -1 })
         .toArray();
-      return handleCORS(NextResponse.json(clean(items)));
+      const cleaned = clean(items);
+      if (isUnfiltered) {
+        mediaCache = cleaned;
+        mediaCacheTime = Date.now();
+      }
+      return handleCORS(NextResponse.json(cleaned), request);
     }
 
     if (route === "/media" && method === "POST") {
@@ -1851,6 +2131,7 @@ async function handleRoute(request, { params }) {
         compressed: !!body.compressed,
       };
       await db.collection("media").insertOne(doc);
+      invalidateCache("media");
       await recordActivity("uploaded", "media", doc.name);
       return handleCORS(NextResponse.json(clean(doc), { status: 201 }));
     }
@@ -1891,6 +2172,7 @@ async function handleRoute(request, { params }) {
           } catch (error) {}
         }
         await db.collection("media").updateOne({ id }, { $set: update });
+        invalidateCache("media");
         const doc = await db.collection("media").findOne({ id });
         await recordActivity("updated", "media", (doc && doc.name) || id);
         return handleCORS(NextResponse.json(clean(doc)));
@@ -1913,6 +2195,7 @@ async function handleRoute(request, { params }) {
           } catch (error) {}
         }
         await db.collection("media").deleteOne({ id });
+        invalidateCache("media");
         await recordActivity("deleted", "media", (doc && doc.name) || id);
         return handleCORS(NextResponse.json({ ok: true }));
       }
@@ -2010,6 +2293,7 @@ async function handleRoute(request, { params }) {
           created.push(doc);
           await recordActivity("uploaded", "media", filename);
         }
+        if (created.length > 0) invalidateCache("media");
       } catch (error) {
         return handleCORS(
           NextResponse.json(
@@ -2138,15 +2422,22 @@ async function handleRoute(request, { params }) {
     // ---------- KEYWORDS ----------
     if (route === "/keywords" && method === "GET") {
       const sp = new URL(request.url).searchParams;
+      const q = sp.get("q");
+      if (!q && serverCache.keywords.data && Date.now() - serverCache.keywords.time < 30000) {
+        return handleCORS(NextResponse.json(serverCache.keywords.data), request);
+      }
       const filter = {};
-      if (sp.get("q"))
-        filter.keyword = { $regex: esc(sp.get("q")), $options: "i" };
+      if (q) filter.keyword = { $regex: esc(q), $options: "i" };
       const items = await db
         .collection("keywords")
         .find(filter)
         .sort({ volume: -1 })
         .toArray();
-      return handleCORS(NextResponse.json(clean(items)));
+      const cleaned = clean(items);
+      if (!q) {
+        serverCache.keywords = { data: cleaned, time: Date.now() };
+      }
+      return handleCORS(NextResponse.json(cleaned), request);
     }
 
     if (route === "/keywords" && method === "POST") {
@@ -2199,6 +2490,7 @@ async function handleRoute(request, { params }) {
         createdAt: new Date().toISOString(),
       };
       await db.collection("keywords").insertOne(doc);
+      invalidateCache("keywords", "stats");
       await recordActivity("created", "keyword", kw);
       return handleCORS(NextResponse.json(clean(doc), { status: 201 }));
     }
@@ -2253,7 +2545,10 @@ async function handleRoute(request, { params }) {
           createdAt: new Date().toISOString(),
         });
       }
-      if (docs.length) await db.collection("keywords").insertMany(docs);
+      if (docs.length) {
+        await db.collection("keywords").insertMany(docs);
+        invalidateCache("keywords", "stats");
+      }
       await recordActivity(
         "imported",
         "keyword",
@@ -2390,6 +2685,7 @@ async function handleRoute(request, { params }) {
                 ? "improving"
                 : "needs-attention";
         await db.collection("keywords").updateOne({ id }, { $set: update });
+        invalidateCache("keywords", "stats");
         const doc = await db.collection("keywords").findOne({ id });
         await recordActivity("updated", "keyword", (doc && doc.keyword) || id);
         return handleCORS(NextResponse.json(clean(doc)));
@@ -2399,6 +2695,7 @@ async function handleRoute(request, { params }) {
           return forbidden("Your role cannot manage keywords.");
         const doc = await db.collection("keywords").findOne({ id });
         await db.collection("keywords").deleteOne({ id });
+        invalidateCache("keywords", "stats");
         await recordActivity("deleted", "keyword", (doc && doc.keyword) || id);
         return handleCORS(NextResponse.json({ ok: true }));
       }
@@ -2406,6 +2703,9 @@ async function handleRoute(request, { params }) {
 
     // ---------- TEAM ----------
     if (route === "/team" && method === "GET") {
+      if (serverCache.team.data && Date.now() - serverCache.team.time < 45000) {
+        return handleCORS(NextResponse.json(serverCache.team.data), request);
+      }
       const [members, blogs] = await Promise.all([
         db.collection("team").find({}).sort({ name: 1 }).toArray(),
         db
@@ -2444,7 +2744,9 @@ async function handleRoute(request, { params }) {
         };
       });
 
-      return handleCORS(NextResponse.json(clean(enriched)));
+      const teamResult = clean(enriched);
+      serverCache.team = { data: teamResult, time: Date.now() };
+      return handleCORS(NextResponse.json(teamResult), request);
     }
 
     if (route === "/team" && method === "POST") {
@@ -2488,6 +2790,7 @@ async function handleRoute(request, { params }) {
         passwordHash: hashPassword(String(body.password)),
       };
       await db.collection("team").insertOne(doc);
+      invalidateCache("team");
       await recordActivity("invited", "user", body.email + " as " + doc.role);
       await notify(
         db,
@@ -2522,6 +2825,7 @@ async function handleRoute(request, { params }) {
           update.passwordHash = hashPassword(String(body.password));
         }
         await db.collection("team").updateOne({ id }, { $set: update });
+        invalidateCache("team");
         const doc = await db.collection("team").findOne({ id });
         await recordActivity("updated", "user", (doc && doc.name) || id);
         return handleCORS(NextResponse.json(clean(publicMember(doc))));
@@ -2531,6 +2835,7 @@ async function handleRoute(request, { params }) {
           return forbidden("Your role cannot remove team members.");
         const doc = await db.collection("team").findOne({ id });
         await db.collection("team").deleteOne({ id });
+        invalidateCache("team");
         await recordActivity("removed", "user", (doc && doc.name) || id);
         return handleCORS(NextResponse.json({ ok: true }));
       }
@@ -2538,12 +2843,17 @@ async function handleRoute(request, { params }) {
 
     // ---------- ROLES ----------
     if (route === "/roles" && method === "GET") {
+      if (serverCache.roles.data && Date.now() - serverCache.roles.time < 60000) {
+        return handleCORS(NextResponse.json(serverCache.roles.data), request);
+      }
       const items = await db
         .collection("roles")
         .find({})
         .sort({ isCustom: 1, name: 1 })
         .toArray();
-      return handleCORS(NextResponse.json(clean(items)));
+      const rolesResult = clean(items);
+      serverCache.roles = { data: rolesResult, time: Date.now() };
+      return handleCORS(NextResponse.json(rolesResult));
     }
 
     if (route === "/permissions" && method === "GET") {
@@ -2579,6 +2889,9 @@ async function handleRoute(request, { params }) {
     }
 
     if (route === "/content-options" && method === "GET") {
+      if (serverCache.contentOptions.data && Date.now() - serverCache.contentOptions.time < 60000) {
+        return handleCORS(NextResponse.json(serverCache.contentOptions.data), request);
+      }
       const options = await db.collection("workspace_config").findOne(
         { id: "default" },
         {
@@ -2594,6 +2907,7 @@ async function handleRoute(request, { params }) {
       if (!cleaned.categories.includes("General")) {
         cleaned.categories.unshift("General");
       }
+      serverCache.contentOptions = { data: cleaned, time: Date.now() };
       return handleCORS(NextResponse.json(cleaned));
     }
 
@@ -2625,6 +2939,7 @@ async function handleRoute(request, { params }) {
           { $addToSet: { categories: name } },
           { upsert: true },
         );
+      invalidateCache("contentOptions", "blogMeta");
       const options = await db
         .collection("workspace_config")
         .findOne({ id: "default" }, { projection: { categories: 1 } });
@@ -2679,6 +2994,7 @@ async function handleRoute(request, { params }) {
             { category: oldName },
             { $set: { category: "General", subcategory: "" } },
           );
+        invalidateCache("contentOptions", "blogMeta");
         return handleCORS(
           NextResponse.json({ ok: true, reassignedTo: "General" }),
         );
@@ -2715,6 +3031,7 @@ async function handleRoute(request, { params }) {
       await db
         .collection("blogs")
         .updateMany({ category: oldName }, { $set: { category: newName } });
+      invalidateCache("contentOptions", "blogMeta");
       return handleCORS(NextResponse.json({ ok: true, name: newName }));
     }
 
@@ -2737,6 +3054,7 @@ async function handleRoute(request, { params }) {
       await db
         .collection("workspace_config")
         .updateOne({ id: "default" }, update, { upsert: true });
+      invalidateCache("contentOptions", "blogMeta");
       const options = await db
         .collection("workspace_config")
         .findOne(
@@ -2790,6 +3108,7 @@ async function handleRoute(request, { params }) {
         await db
           .collection("blogs")
           .updateMany({ subcategory: oldName }, { $set: { subcategory: "" } });
+        invalidateCache("contentOptions", "blogMeta");
         return handleCORS(NextResponse.json({ ok: true }));
       }
       const newName = String(body.newName || "").trim();
@@ -2827,6 +3146,7 @@ async function handleRoute(request, { params }) {
           { subcategory: oldName },
           { $set: { subcategory: newName } },
         );
+      invalidateCache("contentOptions", "blogMeta");
       return handleCORS(NextResponse.json({ ok: true, name: newName }));
     }
 
@@ -2850,6 +3170,7 @@ async function handleRoute(request, { params }) {
         permissions: body.permissions || [],
       };
       await db.collection("roles").insertOne(doc);
+      invalidateCache("roles");
       await recordActivity("created", "role", body.name);
       return handleCORS(NextResponse.json(clean(doc), { status: 201 }));
     }
@@ -2867,6 +3188,7 @@ async function handleRoute(request, { params }) {
           update.description = body.description;
         if (body.name !== undefined) update.name = body.name;
         await db.collection("roles").updateOne({ id }, { $set: update });
+        invalidateCache("roles");
         const doc = await db.collection("roles").findOne({ id });
         await recordActivity("updated", "role", (doc && doc.name) || id);
         return handleCORS(NextResponse.json(clean(doc)));
@@ -2883,6 +3205,7 @@ async function handleRoute(request, { params }) {
             ),
           );
         await db.collection("roles").deleteOne({ id });
+        invalidateCache("roles");
         await recordActivity("deleted", "role", (doc && doc.name) || id);
         return handleCORS(NextResponse.json({ ok: true }));
       }
@@ -2944,15 +3267,26 @@ async function handleRoute(request, { params }) {
       const sp = new URL(request.url).searchParams;
       const ranges = { 7: 7, 30: 30, 90: 90, 180: 180, 365: 365 };
       const n = ranges[sp.get("range") || "30"] || 30;
-      if (process.env.GA4_PROPERTY_ID && process.env.GSC_SITE_URL) {
+
+      if (serverCache.analytics[n] && Date.now() - serverCache.analytics[n].time < 45000) {
+        return handleCORS(NextResponse.json(serverCache.analytics[n].data), request);
+      }
+
+      if (process.env.GA4_PROPERTY_ID && process.env.GSC_SITE_URL && Date.now() >= googleApiCooldownUntil) {
         try {
+          const gaResult = clean(await getGoogleAnalytics(n));
+          serverCache.analytics[n] = { data: gaResult, time: Date.now() };
           return handleCORS(
-            NextResponse.json(clean(await getGoogleAnalytics(n))),
+            NextResponse.json(gaResult),
           );
         } catch (error) {
+          googleApiCooldownUntil = Date.now() + 60000;
+          const cleanErrMsg = error.message?.includes("<!DOCTYPE")
+            ? "Google API temporarily unavailable (HTTP 502 Server Error). Cooling down for 60s."
+            : (error.message || "Unknown error").slice(0, 150);
           console.warn(
             "Google analytics live call failed, falling back to database analytics:",
-            error.message,
+            cleanErrMsg,
           );
         }
       }
@@ -3005,7 +3339,20 @@ async function handleRoute(request, { params }) {
       }));
       const blogs = await db
         .collection("blogs")
-        .find({ status: "published" })
+        .find(
+          { status: "published" },
+          {
+            projection: {
+              id: 1,
+              title: 1,
+              slug: 1,
+              "analytics.views": 1,
+              "analytics.organic": 1,
+              "analytics.impressions": 1,
+              "analytics.clicks": 1,
+            },
+          },
+        )
         .sort({ "analytics.views": -1 })
         .limit(8)
         .toArray();
@@ -3015,68 +3362,78 @@ async function handleRoute(request, { params }) {
         .sort({ volume: -1 })
         .limit(8)
         .toArray();
-      return handleCORS(
-        NextResponse.json(
-          clean({
-            range: n,
-            series,
-            totals,
-            deltas: {
-              organic: pct(totals.organic, prevTotals.organic),
-              views: pct(totals.views, prevTotals.views),
-              engagement: pct(totals.engagement, prevTotals.engagement),
-              conversions: pct(totals.conversions, prevTotals.conversions),
-              impressions: pct(totals.impressions, prevTotals.impressions),
-              ctr: prevTotals.impressions
-                ? +(
-                    (((totals.clicks / totals.impressions) * 100 -
-                      (prevTotals.clicks / prevTotals.impressions) * 100) /
-                      ((prevTotals.clicks / prevTotals.impressions) * 100 ||
-                        1)) *
-                    100
-                  ).toFixed(1)
-                : 0,
-              avgPosition: prevTotals.avgPosition
-                ? +(totals.avgPosition - prevTotals.avgPosition).toFixed(1)
-                : 0,
-            },
-            devices: [],
-            countries: [],
-            topPages: blogs.map((b) => ({
-              id: b.id,
-              title: b.title,
-              slug: b.slug,
-              views: b.analytics?.views || 0,
-              organic: b.analytics?.organic || 0,
-              ctr: b.analytics?.impressions
-                ? +(
-                    (b.analytics.clicks / b.analytics.impressions) *
-                    100
-                  ).toFixed(1)
-                : 0,
-            })),
-            topKeywords: kws.map((k) => ({
-              keyword: k.keyword,
-              position: k.position,
-              previousPosition: k.previousPosition,
-              volume: k.volume,
-              clicks:
-                k.clicks !== undefined && k.clicks !== null ? k.clicks : null,
-              difficulty: k.difficulty,
-            })),
-            ctr: totals.impressions
-              ? +((totals.clicks / totals.impressions) * 100).toFixed(1)
-              : 0,
-          }),
-        ),
-      );
+      const analyticsResult = clean({
+        range: n,
+        series,
+        totals,
+        deltas: {
+          organic: pct(totals.organic, prevTotals.organic),
+          views: pct(totals.views, prevTotals.views),
+          engagement: pct(totals.engagement, prevTotals.engagement),
+          conversions: pct(totals.conversions, prevTotals.conversions),
+          impressions: pct(totals.impressions, prevTotals.impressions),
+          ctr: prevTotals.impressions
+            ? +(
+                (((totals.clicks / totals.impressions) * 100 -
+                  (prevTotals.clicks / prevTotals.impressions) * 100) /
+                  ((prevTotals.clicks / prevTotals.impressions) * 100 ||
+                    1)) *
+                100
+              ).toFixed(1)
+            : 0,
+          avgPosition: prevTotals.avgPosition
+            ? +(totals.avgPosition - prevTotals.avgPosition).toFixed(1)
+            : 0,
+        },
+        devices: [],
+        countries: [],
+        topPages: blogs.map((b) => ({
+          id: b.id,
+          title: b.title,
+          slug: b.slug,
+          views: b.analytics?.views || 0,
+          organic: b.analytics?.organic || 0,
+          ctr: b.analytics?.impressions
+            ? +(
+                (b.analytics.clicks / b.analytics.impressions) *
+                100
+              ).toFixed(1)
+            : 0,
+        })),
+        topKeywords: kws.map((k) => ({
+          keyword: k.keyword,
+          position: k.position,
+          previousPosition: k.previousPosition,
+          volume: k.volume,
+          clicks:
+            k.clicks !== undefined && k.clicks !== null ? k.clicks : null,
+          difficulty: k.difficulty,
+        })),
+        ctr: totals.impressions
+          ? +((totals.clicks / totals.impressions) * 100).toFixed(1)
+          : 0,
+      });
+      serverCache.analytics[n] = { data: analyticsResult, time: Date.now() };
+      return handleCORS(NextResponse.json(analyticsResult), request);
     }
 
     // ---------- GOOGLE INDEXING ----------
     if (route === "/indexing" && method === "GET") {
       const blogs = await db
         .collection("blogs")
-        .find({ status: "published" })
+        .find(
+          { status: "published" },
+          {
+            projection: {
+              id: 1,
+              title: 1,
+              slug: 1,
+              featuredImage: 1,
+              publishedAt: 1,
+              updatedAt: 1,
+            },
+          },
+        )
         .sort({ publishedAt: -1, updatedAt: -1 })
         .toArray();
 
@@ -3086,15 +3443,38 @@ async function handleRoute(request, { params }) {
 
     // ---------- SEO ISSUES ----------
     if (route === "/seo-issues" && method === "GET") {
-      const blogs = await db
-        .collection("blogs")
-        .find({ status: { $ne: "archived" } })
-        .toArray();
-      const allBlogs = await db
-        .collection("blogs")
-        .find({}, { projection: { slug: 1, id: 1 } })
-        .toArray();
-      const media = await db.collection("media").find({}).toArray();
+      if (serverCache.seoIssues.data && Date.now() - serverCache.seoIssues.time < 60000) {
+        return handleCORS(NextResponse.json(serverCache.seoIssues.data), request);
+      }
+
+      // Use lean projection — seoAudit stores pre-computed hasHeading/missingAlt/hasInternalLinks
+      // so we don't need to fetch 8MB+ of contentHtml on every request.
+      const [blogs, allSlugs, media] = await Promise.all([
+        db
+          .collection("blogs")
+          .find(
+            { status: { $ne: "archived" } },
+            {
+              projection: {
+                id: 1,
+                title: 1,
+                slug: 1,
+                seo: 1,
+                seoAudit: 1,
+              },
+            },
+          )
+          .toArray(),
+        db.collection("blogs").distinct("slug"),
+        db
+          .collection("media")
+          .find({}, { projection: { id: 1, name: 1, size: 1 } })
+          .toArray(),
+      ]);
+
+      const slugSet = new Set(
+        allSlugs.map((s) => (s || "").toLowerCase().trim()).filter(Boolean),
+      );
       const issues = [];
       const sanitizeAffected = (arr) =>
         arr.map((item) => ({
@@ -3158,11 +3538,8 @@ async function handleRoute(request, { params }) {
         longTitle,
         "title",
       );
-      const noH1 = blogs.filter(
-        (b) =>
-          !/<h1[\s>]/i.test(b.contentHtml || "") &&
-          !/<h2[\s>]/i.test(b.contentHtml || ""),
-      );
+      // Use pre-computed seoAudit.hasHeading — avoids loading full HTML
+      const noH1 = blogs.filter((b) => b.seoAudit ? !b.seoAudit.hasHeading : true);
       addIssue(
         "missing-h1",
         "Missing H1 heading",
@@ -3171,10 +3548,8 @@ async function handleRoute(request, { params }) {
         noH1,
         "content",
       );
-      const noAlt = blogs.filter((b) => {
-        const imgs = (b.contentHtml || "").match(/<img[^>]*>/gi) || [];
-        return imgs.some((t) => !/alt\s*=\s*["'][^"']+["']/i.test(t));
-      });
+      // Use pre-computed seoAudit.missingAlt
+      const noAlt = blogs.filter((b) => b.seoAudit ? b.seoAudit.missingAlt : false);
       addIssue(
         "missing-alt",
         "Missing image alt text",
@@ -3183,13 +3558,8 @@ async function handleRoute(request, { params }) {
         noAlt,
         "content",
       );
-      const noInternal = blogs.filter((b) => {
-        const html = b.contentHtml || "";
-        const hrefs = [...html.matchAll(/href\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]);
-        return !hrefs.some(
-          (h) => h.startsWith("/") || h.startsWith("#") || h.includes("vinimay.sharda.co.in")
-        );
-      });
+      // Use pre-computed seoAudit.hasInternalLinks
+      const noInternal = blogs.filter((b) => b.seoAudit ? !b.seoAudit.hasInternalLinks : false);
       addIssue(
         "no-internal-links",
         "No internal links",
@@ -3201,8 +3571,6 @@ async function handleRoute(request, { params }) {
       const invalidCanonical = blogs.filter((b) => {
         const c = b.seo && b.seo.canonical && b.seo.canonical.trim();
         if (c) return !/^https?:\/\//i.test(c);
-        // If empty, Vinimay auto-generates self-referencing canonical from slug.
-        // Only flag if neither slug nor canonical exists.
         return !b.slug || !b.slug.trim();
       });
       addIssue(
@@ -3233,16 +3601,10 @@ async function handleRoute(request, { params }) {
         bigMedia.map((m) => ({ id: m.id, title: m.name })),
         "media",
       );
+      // Use pre-computed seoAudit.internalBlogSlugs to detect broken links
       const broken = blogs.filter((b) => {
-        const hrefs = [
-          ...(b.contentHtml || "").matchAll(
-            /href\s*=\s*["'](?:https?:\/\/vinimay\.sharda\.co\.in)?\/(?:blogs|blog)\/([^"'/#?\s]+)["']/gi,
-          ),
-        ];
-        return hrefs.some((m) => {
-          const linkSlug = (m[1] || "").toLowerCase().trim();
-          return linkSlug && !allBlogs.some((x) => (x.slug || "").toLowerCase().trim() === linkSlug);
-        });
+        const slugs = b.seoAudit?.internalBlogSlugs || [];
+        return slugs.some((s) => s && !slugSet.has(s));
       });
       addIssue(
         "broken-internal-link",
@@ -3256,23 +3618,21 @@ async function handleRoute(request, { params }) {
       blogs.forEach((b) => {
         if (b.seo && b.seo.score >= 80) passed++;
       });
-      return handleCORS(
-        NextResponse.json(
-          clean({
-            issues,
-            summary: {
-              critical: issues
-                .filter((i) => i.severity === "critical")
-                .reduce((a, i) => a + i.affected.length, 0),
-              warnings: issues
-                .filter((i) => i.severity === "warning")
-                .reduce((a, i) => a + i.affected.length, 0),
-              passed,
-              audits: blogs.length * 10,
-            },
-          }),
-        ),
-      );
+      const responseData = clean({
+        issues,
+        summary: {
+          critical: issues
+            .filter((i) => i.severity === "critical")
+            .reduce((a, i) => a + i.affected.length, 0),
+          warnings: issues
+            .filter((i) => i.severity === "warning")
+            .reduce((a, i) => a + i.affected.length, 0),
+          passed,
+          audits: blogs.length * 10,
+        },
+      });
+      serverCache.seoIssues = { data: responseData, time: Date.now() };
+      return handleCORS(NextResponse.json(responseData), request);
     }
 
     // ---------- GLOBAL SEARCH ----------
@@ -3421,6 +3781,7 @@ async function handleRoute(request, { params }) {
       await db
         .collection("settings")
         .updateOne({ id: "app-settings" }, { $set: merged }, { upsert: true });
+      invalidateCache("settings");
       await recordActivity("updated", "settings", "Workspace settings");
       const s = await db.collection("settings").findOne({ id: "app-settings" });
       return handleCORS(NextResponse.json(clean(s)));

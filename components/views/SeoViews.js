@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
-import useSWR from 'swr'
-import { AlertTriangle, CheckCircle2, Gauge, ShieldAlert, Wand2, ArrowRight, FileText, XCircle, Sparkles } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import useSWR, { mutate as swrMutate, preload } from 'swr'
+import { AlertTriangle, CheckCircle2, Gauge, ShieldAlert, Wand2, ArrowRight, FileText, XCircle, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -69,7 +69,16 @@ export function SeoOverview({ navigate }) {
           {!blogs ? <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div> : (
             <div className="space-y-1.5">
               {blogs.items.map((b) => (
-                <button key={b.id} onClick={() => navigate('editor', { id: b.id })} className="w-full flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent transition-colors text-left">
+                <button
+                  key={b.id}
+                  onMouseEnter={() => { if (b?.id) preload('/api/blogs/' + b.id, fetcher) }}
+                  onClick={() => {
+                    preload('/api/blogs/' + b.id, fetcher)
+                    swrMutate('/api/blogs/' + b.id, (prev) => prev || b, false)
+                    navigate('editor', { id: b.id })
+                  }}
+                  className="w-full flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent transition-colors text-left"
+                >
                   <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
                   <span className="text-[13px] font-medium truncate flex-1">{b.title}</span>
                   <div className="w-24 h-1.5 rounded-full bg-muted overflow-hidden hidden sm:block"><div className={'h-full rounded-full ' + (b.seo?.score >= 75 ? 'bg-emerald-500' : b.seo?.score >= 50 ? 'bg-amber-500' : 'bg-rose-500')} style={{ width: (b.seo?.score || 0) + '%' }} /></div>
@@ -87,6 +96,7 @@ export function SeoOverview({ navigate }) {
 // ---------------- SEO ISSUES ----------------
 export function SeoIssues({ navigate }) {
   const { data, error, mutate } = useSWR('/api/seo-issues', fetcher)
+  const [expandedIssues, setExpandedIssues] = useState({})
 
   useEffect(() => {
     const handleRefresh = () => mutate()
@@ -121,48 +131,81 @@ export function SeoIssues({ navigate }) {
 
       <div className="space-y-3">
         {data.issues.length === 0 && <Card><CardContent><EmptyState icon={CheckCircle2} title="No issues found" description="Every audited blog passes the SEO checklist. Great job!" /></CardContent></Card>}
-        {data.issues.map((iss) => (
-          <Card key={iss.id} className="card-hover">
-            <CardContent className="p-4 flex flex-col lg:flex-row lg:items-center gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="font-semibold text-[14px]">{iss.title}</h3>
-                  <SevBadge severity={iss.severity} />
-                  <Badge variant="outline" className="text-[11px] font-normal">{iss.affected.length} affected</Badge>
+        {data.issues.map((iss) => {
+          const isExpanded = !!expandedIssues[iss.id]
+          const visibleAffected = isExpanded ? iss.affected : iss.affected.slice(0, 6)
+
+          return (
+            <Card key={iss.id} className="card-hover">
+              <CardContent className="p-4 flex flex-col lg:flex-row lg:items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-semibold text-[14px]">{iss.title}</h3>
+                    <SevBadge severity={iss.severity} />
+                    <Badge variant="outline" className="text-[11px] font-normal">{iss.affected.length} affected</Badge>
+                  </div>
+                  <p className="text-[12.5px] text-muted-foreground mt-1">{iss.description}</p>
+                  <div className={`flex flex-wrap gap-1.5 mt-2 transition-all ${isExpanded ? 'max-h-64 overflow-y-auto pr-1 p-2 rounded-lg bg-accent/20 border border-border/60 shadow-inner' : ''}`}>
+                    {visibleAffected.map((a, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onMouseEnter={() => { if (a?.id) preload('/api/blogs/' + a.id, fetcher) }}
+                        onClick={() => {
+                          if (iss.fixTarget === 'media') navigate('media', {})
+                          else if (a.id) {
+                            preload('/api/blogs/' + a.id, fetcher)
+                            swrMutate('/api/blogs/' + a.id, (prev) => prev || a, false)
+                            navigate('editor', { id: a.id, focus: iss.fixTarget })
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-border/80 bg-muted/40 hover:bg-violet-50 hover:border-violet-300 hover:text-violet-700 dark:hover:bg-violet-950/40 dark:hover:border-violet-700 dark:hover:text-violet-300 text-[11px] font-medium max-w-[280px] truncate transition-colors cursor-pointer text-left group"
+                        title={`Fix in "${a.title || a.name || 'this item'}"`}
+                      >
+                        <span className="truncate">{a.title || a.name || 'Untitled'}</span>
+                        <ArrowRight className="h-2.5 w-2.5 opacity-40 group-hover:opacity-100 shrink-0 transition-opacity" />
+                      </button>
+                    ))}
+                    {iss.affected.length > 6 && (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedIssues((prev) => ({ ...prev, [iss.id]: !prev[iss.id] }))}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-dashed border-violet-300 dark:border-violet-700 bg-violet-50/80 hover:bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:hover:bg-violet-900/60 dark:text-violet-300 text-[11px] font-semibold transition-all cursor-pointer self-center"
+                        title={isExpanded ? 'Collapse affected list' : 'View all affected blogs'}
+                      >
+                        {isExpanded ? (
+                          <>
+                            Show less
+                            <ChevronUp className="h-3 w-3" />
+                          </>
+                        ) : (
+                          <>
+                            +{iss.affected.length - 6} more
+                            <ChevronDown className="h-3 w-3" />
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <p className="text-[12.5px] text-muted-foreground mt-1">{iss.description}</p>
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {iss.affected.slice(0, 6).map((a, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        if (iss.fixTarget === 'media') navigate('media', {})
-                        else if (a.id) navigate('editor', { id: a.id, focus: iss.fixTarget })
-                      }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-border/80 bg-muted/40 hover:bg-violet-50 hover:border-violet-300 hover:text-violet-700 dark:hover:bg-violet-950/40 dark:hover:border-violet-700 dark:hover:text-violet-300 text-[11px] font-medium max-w-[280px] truncate transition-colors cursor-pointer text-left group"
-                      title={`Fix in "${a.title || a.name || 'this item'}"`}
-                    >
-                      <span className="truncate">{a.title || a.name || 'Untitled'}</span>
-                      <ArrowRight className="h-2.5 w-2.5 opacity-40 group-hover:opacity-100 shrink-0 transition-opacity" />
-                    </button>
-                  ))}
-                  {iss.affected.length > 6 && (
-                    <Badge variant="outline" className="text-[10.5px] font-normal self-center">
-                      +{iss.affected.length - 6} more
-                    </Badge>
-                  )}
-                </div>
-              </div>
-              <Button onClick={() => {
-                if (iss.fixTarget === 'media') navigate('media', {})
-                else if (iss.affected[0] && iss.affected[0].id) navigate('editor', { id: iss.affected[0].id, focus: iss.fixTarget })
-              }}>
+              <Button
+                onMouseEnter={() => { if (iss.affected[0]?.id) preload('/api/blogs/' + iss.affected[0].id, fetcher) }}
+                onClick={() => {
+                  if (iss.fixTarget === 'media') navigate('media', {})
+                  else if (iss.affected[0] && iss.affected[0].id) {
+                    const target = iss.affected[0]
+                    preload('/api/blogs/' + target.id, fetcher)
+                    swrMutate('/api/blogs/' + target.id, (prev) => prev || target, false)
+                    navigate('editor', { id: target.id, focus: iss.fixTarget })
+                  }
+                }}
+              >
                 Fix issue <ArrowRight className="h-4 w-4 ml-1.5" />
               </Button>
             </CardContent>
           </Card>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
@@ -187,17 +230,39 @@ export function ContentOptimization({ navigate }) {
             const a = analyzeSeo(b)
             const failing = a.checks.filter((c) => !c.ok).slice(0, 3)
             return (
-              <Card key={b.id} className="card-hover">
+              <Card
+                key={b.id}
+                className="card-hover"
+                onMouseEnter={() => { if (b?.id) preload('/api/blogs/' + b.id, fetcher) }}
+              >
                 <CardContent className="p-4 flex flex-col lg:flex-row gap-4 lg:items-center">
                   <ScoreRing value={a.score} size={56} thickness={6} />
                   <div className="flex-1 min-w-0">
-                    <button onClick={() => navigate('blog', { id: b.id })} className="text-[14px] font-semibold hover:text-primary transition-colors text-left">{b.title}</button>
+                    <button
+                      onClick={() => {
+                        preload('/api/blogs/' + b.id, fetcher)
+                        swrMutate('/api/blogs/' + b.id, (prev) => prev || b, false)
+                        navigate('blog', { id: b.id })
+                      }}
+                      className="text-[14px] font-semibold hover:text-primary transition-colors text-left"
+                    >
+                      {b.title}
+                    </button>
                     <div className="flex flex-wrap gap-1.5 mt-2">
                       {failing.length === 0 && <Badge variant="outline" className="text-[10.5px] border-emerald-200 text-emerald-700 dark:border-emerald-900 dark:text-emerald-300">All checks passing ✓</Badge>}
                       {failing.map((f) => <Badge key={f.id} variant="outline" className="text-[10.5px] font-normal border-amber-200 text-amber-700 dark:border-amber-900 dark:text-amber-300">{f.label}</Badge>)}
                     </div>
                   </div>
-                  <Button variant="outline" onClick={() => navigate('editor', { id: b.id, focus: 'seo' })}><Wand2 className="h-4 w-4 mr-1.5" />Optimize</Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      preload('/api/blogs/' + b.id, fetcher)
+                      swrMutate('/api/blogs/' + b.id, (prev) => prev || b, false)
+                      navigate('editor', { id: b.id, focus: 'seo' })
+                    }}
+                  >
+                    <Wand2 className="h-4 w-4 mr-1.5" />Optimize
+                  </Button>
                 </CardContent>
               </Card>
             )
