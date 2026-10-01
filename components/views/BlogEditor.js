@@ -289,6 +289,7 @@ export default function BlogEditor({
   user,
   setUser,
   focus,
+  returnView,
 }) {
   const isEdit = !!blogId;
   const [id, setId] = useState(blogId);
@@ -310,7 +311,7 @@ export default function BlogEditor({
   const [reAuthError, setReAuthError] = useState("");
   const [localDraftNotice, setLocalDraftNotice] = useState(null);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
-  const [leaveTarget, setLeaveTarget] = useState("blogs");
+  const [leaveTarget, setLeaveTarget] = useState(returnView || "blogs");
   const [saveAndLeaveLoading, setSaveAndLeaveLoading] = useState(false);
   const [tab, setTab] = useState("seo");
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -374,7 +375,10 @@ export default function BlogEditor({
   const fileMode = useRef("content");
 
   const { data: team } = useSWR("/api/team", fetcher);
-  const { data: allBlogs } = useSWR("/api/blogs?limit=2000&fields=calendar", fetcher);
+  const { data: allBlogs } = useSWR(
+    "/api/blogs?limit=2000&fields=calendar",
+    fetcher,
+  );
   const { data: keywords } = useSWR("/api/keywords", fetcher);
   const { data: contentOptions, mutate: mutateContentOptions } = useSWR(
     "/api/content-options",
@@ -1432,7 +1436,9 @@ export default function BlogEditor({
 
   async function transition(to, scheduledAt, feedback) {
     if (to === "published" || to === "scheduled") {
-      if (!validateMandatoryFields(to === "scheduled" ? "schedule" : "publish")) {
+      if (
+        !validateMandatoryFields(to === "scheduled" ? "schedule" : "publish")
+      ) {
         return;
       }
     }
@@ -2586,10 +2592,10 @@ export default function BlogEditor({
             size="icon"
             onClick={() => {
               if (hasChanges || dirty) {
-                setLeaveTarget("blogs");
+                setLeaveTarget(returnView || "blogs");
                 setLeaveConfirmOpen(true);
               } else {
-                navigate("blogs", {});
+                navigate(returnView || "blogs", {});
               }
             }}
           >
@@ -2606,14 +2612,16 @@ export default function BlogEditor({
               >
                 {statusMeta.label}
               </Badge>
-              {form.translations && Object.keys(form.translations).length > 0 && (
-                <Badge
-                  variant="outline"
-                  className="text-[11px] font-medium gap-1 bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300"
-                >
-                  <Globe className="h-3 w-3" /> {Object.keys(form.translations).length + 1} Languages Live
-                </Badge>
-              )}
+              {form.translations &&
+                Object.keys(form.translations).length > 0 && (
+                  <Badge
+                    variant="outline"
+                    className="text-[11px] font-medium gap-1 bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300"
+                  >
+                    <Globe className="h-3 w-3" />{" "}
+                    {Object.keys(form.translations).length + 1} Languages Live
+                  </Badge>
+                )}
               {form.status === "scheduled" && form.scheduledAt && (
                 <span className="text-[11px] font-medium text-violet-600 dark:text-violet-400 flex items-center gap-1">
                   <Clock className="h-3 w-3" />
@@ -2854,7 +2862,9 @@ export default function BlogEditor({
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
             <span>
-              <strong>Unsaved Local Draft Found:</strong> We detected unsaved changes from {timeAgo(localDraftNotice.savedAt)}. Would you like to restore your work?
+              <strong>Unsaved Local Draft Found:</strong> We detected unsaved
+              changes from {timeAgo(localDraftNotice.savedAt)}. Would you like
+              to restore your work?
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-auto">
@@ -4485,14 +4495,16 @@ export default function BlogEditor({
                   Unsaved changes in blog
                 </DialogTitle>
                 <DialogDescription className="text-xs">
-                  You have unsaved changes. What would you like to do before leaving?
+                  You have unsaved changes. What would you like to do before
+                  leaving?
                 </DialogDescription>
               </div>
             </div>
           </DialogHeader>
 
           <div className="py-1 text-xs text-muted-foreground">
-            If you leave without saving, your recent edits will be kept only in local browser cache and not updated on the server.
+            If you leave without saving, your recent edits will be kept only in
+            local browser cache and not updated on the server.
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-between sm:gap-2 pt-2">
@@ -4569,7 +4581,9 @@ export default function BlogEditor({
             <div className="rounded-lg bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/50 p-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
               <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
               <span>
-                <strong>Zero Data Loss:</strong> Enter your credentials to refresh your session. Your work will be saved automatically without reloading the page.
+                <strong>Zero Data Loss:</strong> Enter your credentials to
+                refresh your session. Your work will be saved automatically
+                without reloading the page.
               </span>
             </div>
 
@@ -4581,7 +4595,9 @@ export default function BlogEditor({
             )}
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground">Email</label>
+              <label className="text-xs font-medium text-foreground">
+                Email
+              </label>
               <Input
                 type="email"
                 value={reAuthEmail}
@@ -4593,7 +4609,9 @@ export default function BlogEditor({
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground">Password</label>
+              <label className="text-xs font-medium text-foreground">
+                Password
+              </label>
               <div className="relative">
                 <Input
                   type={reAuthShowPass ? "text" : "password"}

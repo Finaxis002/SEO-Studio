@@ -65,7 +65,7 @@ import {
 } from "../bits";
 import { Donut } from "../charts";
 
-export default function BlogDetail({ blogId, navigate, can }) {
+export default function BlogDetail({ blogId, returnView, navigate, can }) {
   const [activeTab, setActiveTab] = useState("content");
   const {
     data: b,
@@ -94,13 +94,52 @@ export default function BlogDetail({ blogId, navigate, can }) {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewLang, setPreviewLang] = useState("en");
 
+  const analysis = useMemo(() => (b ? analyzeSeo(b) : { checks: [] }), [b]);
+  const blogActivity = useMemo(() => {
+    if (!activity?.items || !b?.title) return [];
+    return activity.items
+      .filter((a) => a.resource && a.resource.includes(b.title.slice(0, 20)))
+      .slice(0, 10);
+  }, [activity?.items, b?.title]);
+  const usedMedia = useMemo(() => {
+    if (!media || !b?.id) return [];
+    return media.filter((m) => (m.usedIn || []).some((u) => u.blogId === b.id));
+  }, [media, b?.id]);
+  const imageCount = useMemo(() => {
+    let count = 0;
+    if (b?.featuredImage?.url) count++;
+    if (b?.contentHtml) {
+      const inlineMatches = b.contentHtml.match(
+        /<img[^>]+src=["'][^"']+["']/gi,
+      );
+      if (inlineMatches) count += inlineMatches.length;
+    }
+    return count;
+  }, [b?.featuredImage?.url, b?.contentHtml]);
+  const hrefs = useMemo(() => {
+    if (!b?.contentHtml) return [];
+    return [...b.contentHtml.matchAll(/href\s*=\s*["']([^"']+)["']/gi)].map(
+      (m) => m[1],
+    );
+  }, [b?.contentHtml]);
+  const internalHrefs = useMemo(
+    () => hrefs.filter((h) => h.startsWith("/")),
+    [hrefs],
+  );
+  const externalHrefs = useMemo(
+    () => hrefs.filter((h) => /^https?:\/\//.test(h)),
+    [hrefs],
+  );
+
   if (error)
     return (
       <EmptyState
         title="Blog not found"
         description="It may have been deleted."
         action={
-          <Button onClick={() => navigate("blogs", {})}>Back to blogs</Button>
+          <Button onClick={() => navigate(returnView || "blogs", {})}>
+            Back to blogs
+          </Button>
         }
       />
     );
@@ -137,43 +176,6 @@ export default function BlogDetail({ blogId, navigate, can }) {
         </Card>
       </div>
     );
-
-  const analysis = useMemo(() => (b ? analyzeSeo(b) : { checks: [] }), [b]);
-  const blogActivity = useMemo(() => {
-    if (!activity?.items || !b?.title) return [];
-    return activity.items
-      .filter((a) => a.resource && a.resource.includes(b.title.slice(0, 20)))
-      .slice(0, 10);
-  }, [activity?.items, b?.title]);
-  const usedMedia = useMemo(() => {
-    if (!media || !b?.id) return [];
-    return media.filter((m) =>
-      (m.usedIn || []).some((u) => u.blogId === b.id),
-    );
-  }, [media, b?.id]);
-  const imageCount = useMemo(() => {
-    let count = 0;
-    if (b?.featuredImage?.url) count++;
-    if (b?.contentHtml) {
-      const inlineMatches = b.contentHtml.match(/<img[^>]+src=["'][^"']+["']/gi);
-      if (inlineMatches) count += inlineMatches.length;
-    }
-    return count;
-  }, [b?.featuredImage?.url, b?.contentHtml]);
-  const hrefs = useMemo(() => {
-    if (!b?.contentHtml) return [];
-    return [...b.contentHtml.matchAll(/href\s*=\s*["']([^"']+)["']/gi)].map(
-      (m) => m[1],
-    );
-  }, [b?.contentHtml]);
-  const internalHrefs = useMemo(
-    () => hrefs.filter((h) => h.startsWith("/")),
-    [hrefs],
-  );
-  const externalHrefs = useMemo(
-    () => hrefs.filter((h) => /^https?:\/\//.test(h)),
-    [hrefs],
-  );
 
   const metrics = [
     {
@@ -217,10 +219,10 @@ export default function BlogDetail({ blogId, navigate, can }) {
   return (
     <div className="space-y-5 animate-fade-up">
       <button
-        onClick={() => navigate("blogs", {})}
+        onClick={() => navigate(returnView || "blogs", {})}
         className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground transition-colors"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to all blogs
+        <ArrowLeft className="h-4 w-4" /> Back to blogs
       </button>
 
       {/* Header */}
@@ -244,7 +246,8 @@ export default function BlogDetail({ blogId, navigate, can }) {
                   variant="outline"
                   className="text-[11px] font-medium gap-1 bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300"
                 >
-                  <Globe className="h-3 w-3" /> {Object.keys(b.translations).length + 1} Languages Live
+                  <Globe className="h-3 w-3" />{" "}
+                  {Object.keys(b.translations).length + 1} Languages Live
                 </Badge>
               )}
               {b.status === "published" && thisBlogIndex && (
@@ -267,7 +270,9 @@ export default function BlogDetail({ blogId, navigate, can }) {
                   ) : (
                     <AlertTriangle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
                   )}
-                  {thisBlogIndex.isIndexed ? "Google Indexed" : "Google: Pending Crawl"}
+                  {thisBlogIndex.isIndexed
+                    ? "Google Indexed"
+                    : "Google: Pending Crawl"}
                 </Badge>
               )}
               {b.scheduledAt && b.status === "scheduled" && (
@@ -443,7 +448,10 @@ export default function BlogDetail({ blogId, navigate, can }) {
                             action: {
                               label: "View on Vinimay ↗",
                               onClick: () =>
-                                window.open(getVinimayBlogUrl(b.slug), "_blank"),
+                                window.open(
+                                  getVinimayBlogUrl(b.slug),
+                                  "_blank",
+                                ),
                             },
                             duration: 9000,
                           });
@@ -526,7 +534,10 @@ export default function BlogDetail({ blogId, navigate, can }) {
                     can("blogs.schedule") && (
                       <DropdownMenuItem
                         onClick={() => {
-                          if (b.status === "draft" || b.status === "in_review") {
+                          if (
+                            b.status === "draft" ||
+                            b.status === "in_review"
+                          ) {
                             const score = b.seo?.score || 0;
                             setConfirmDialog({
                               title: `Schedule blog from ${b.status === "draft" ? "Draft" : "Review"}?`,
@@ -693,7 +704,7 @@ export default function BlogDetail({ blogId, navigate, can }) {
                           destructive: true,
                           onConfirm: () =>
                             api("/blogs/" + b.id, { method: "DELETE" }).then(
-                              () => navigate("blogs", {}),
+                              () => navigate(returnView || "blogs", {}),
                             ),
                         })
                       }
@@ -778,7 +789,10 @@ export default function BlogDetail({ blogId, navigate, can }) {
                   <ChevronDown className="h-3 w-3 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52 p-1.5 rounded-xl shadow-lg">
+              <DropdownMenuContent
+                align="end"
+                className="w-52 p-1.5 rounded-xl shadow-lg"
+              >
                 <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground border-b border-border/50 mb-1">
                   Select Preview Language
                 </div>
@@ -825,7 +839,6 @@ export default function BlogDetail({ blogId, navigate, can }) {
         <TabsContent value="content" className="mt-4">
           <Card>
             <CardContent className="p-6 lg:p-8">
-
               {previewLang !== "en" && b.translations?.[previewLang]?.title && (
                 <div className="mb-6 pb-3 border-b border-muted">
                   <h2 className="text-xl font-bold tracking-tight text-foreground">
@@ -1084,7 +1097,9 @@ export default function BlogDetail({ blogId, navigate, can }) {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-[14px]">External links ({externalHrefs.length})</CardTitle>
+                <CardTitle className="text-[14px]">
+                  External links ({externalHrefs.length})
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {externalHrefs.length ? (

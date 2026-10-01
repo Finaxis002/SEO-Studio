@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import useSWR, { mutate as swrMutate } from "swr";
+import { mutate as swrMutate } from "swr";
+import useSWRInfinite from "swr/infinite";
 import { toast } from "sonner";
 import {
   Search,
@@ -42,7 +43,9 @@ import { api, fetcher, fmtDate, fmtNum } from "@/lib/client";
 import { EmptyState, ConfirmDialog } from "../bits";
 
 export default function Media({ navigate, can, initialUpload }) {
+  const pageSize = 36;
   const [q, setQ] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [type, setType] = useState("all");
   const [folder, setFolder] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -51,13 +54,44 @@ export default function Media({ navigate, can, initialUpload }) {
   const [newFolder, setNewFolder] = useState("");
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [displayCount, setDisplayCount] = useState(36);
   const [loadingMore, setLoadingMore] = useState(false);
   const fileRef = useRef(null);
   const replaceRef = useRef(null);
   const loadMoreRef = useRef(null);
 
-  const { data: allMedia, error, mutate } = useSWR("/api/media", fetcher);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(q.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [q]);
+
+  const getMediaKey = (pageIndex, previousPage) => {
+    if (previousPage && previousPage.page >= previousPage.pages) return null;
+    const params = new URLSearchParams({
+      page: String(pageIndex + 1),
+      limit: String(pageSize),
+    });
+    if (debouncedQuery) params.set("q", debouncedQuery);
+    if (folder) params.set("folder", folder);
+    if (type !== "all") params.set("type", type);
+    return "/api/media?" + params.toString();
+  };
+
+  const {
+    data: mediaPages,
+    error,
+    mutate,
+    size,
+    setSize,
+    isValidating,
+  } = useSWRInfinite(getMediaKey, fetcher);
+  const allMedia = mediaPages
+    ? mediaPages.flatMap((page) => page.items || [])
+    : null;
+  const total = mediaPages?.[0]?.total || 0;
+  const hasMore =
+    !!mediaPages?.length &&
+    mediaPages[mediaPages.length - 1].page <
+      mediaPages[mediaPages.length - 1].pages;
 
   const [extraFolders, setExtraFolders] = useState(() => {
     try {
@@ -68,67 +102,54 @@ export default function Media({ navigate, can, initialUpload }) {
   });
 
   const folders = useMemo(() => {
-    const map = {};
-    (allMedia || []).forEach((m) => {
-      map[m.folder] = (map[m.folder] || 0) + 1;
-    });
+    const map = Object.fromEntries(
+      (mediaPages?.[0]?.folders || []).map((item) => [item.name, item.count]),
+    );
     extraFolders.forEach((f) => {
       if (!map[f]) map[f] = 0;
     });
     return Object.entries(map).map(([name, count]) => ({ name, count }));
-  }, [allMedia, extraFolders]);
+  }, [mediaPages?.[0]?.folders, extraFolders]);
 
-  const filteredMedia = useMemo(() => {
-    if (!allMedia) return null;
-    return allMedia.filter((m) => {
-      if (type !== "all" && m.type !== type) return false;
-      if (folder && m.folder !== folder) return false;
-      if (q.trim()) {
-        const query = q.toLowerCase();
-        const matchName = (m.name || "").toLowerCase().includes(query);
-        const matchAlt = (m.alt || "").toLowerCase().includes(query);
-        if (!matchName && !matchAlt) return false;
-      }
-      return true;
-    });
-  }, [allMedia, q, type, folder]);
-
-  const visibleMedia = useMemo(() => {
-    if (!filteredMedia) return null;
-    return filteredMedia.slice(0, displayCount);
-  }, [filteredMedia, displayCount]);
-
-  // Reset display count when active filters change
+  // Start a fresh page sequence when the server-side filters change.
   useEffect(() => {
-    setDisplayCount(36);
-  }, [q, type, folder]);
+    setSize(1);
+  }, [debouncedQuery, type, folder, setSize]);
 
-  // Infinite scroll observer: load next batch when scrolling near bottom
+  // Fetch another server page when scrolling near the bottom.
   useEffect(() => {
     const sentinel = loadMoreRef.current;
     if (!sentinel) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && filteredMedia && filteredMedia.length > displayCount) {
+        if (
+          entries[0]?.isIntersecting &&
+          hasMore &&
+          !isValidating &&
+          !loadingMore
+        ) {
           setLoadingMore(true);
-          setTimeout(() => {
-            setDisplayCount((prev) => prev + 24);
-            setLoadingMore(false);
-          }, 150);
+          setSize((current) => current + 1).then(
+            () => setLoadingMore(false),
+            () => setLoadingMore(false),
+          );
         }
       },
-      { rootMargin: "300px", threshold: 0.1 }
+      { rootMargin: "300px", threshold: 0.1 },
     );
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [filteredMedia, displayCount]);
+  }, [hasMore, isValidating, loadingMore, setSize]);
 
   function getThumbnailUrl(url) {
     if (!url || typeof url !== "string") return url;
     if (url.includes("res.cloudinary.com") && url.includes("/image/upload/")) {
-      return url.replace("/image/upload/", "/image/upload/w_400,c_fill,q_auto,f_auto/");
+      return url.replace(
+        "/image/upload/",
+        "/image/upload/w_400,c_fill,q_auto,f_auto/",
+      );
     }
     return url;
   }
@@ -290,8 +311,8 @@ export default function Media({ navigate, can, initialUpload }) {
               <span className="text-violet-600 font-medium">
                 Drop files to upload…
               </span>
-            ) : filteredMedia ? (
-              filteredMedia.length + " files · " + folders.length + " folders"
+            ) : allMedia ? (
+              total + " files · " + folders.length + " folders"
             ) : (
               "Loading…"
             )}
@@ -415,13 +436,13 @@ export default function Media({ navigate, can, initialUpload }) {
             />
           </CardContent>
         </Card>
-      ) : !filteredMedia ? (
+      ) : !allMedia ? (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
           {Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} className="h-52 rounded-xl" />
           ))}
         </div>
-      ) : filteredMedia.length === 0 ? (
+      ) : allMedia.length === 0 ? (
         <Card>
           <CardContent>
             <EmptyState
@@ -442,7 +463,7 @@ export default function Media({ navigate, can, initialUpload }) {
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-            {visibleMedia.map((m) => {
+            {allMedia.map((m) => {
               const Icon = typeIcon(m.type);
               return (
                 <Card
@@ -458,113 +479,117 @@ export default function Media({ navigate, can, initialUpload }) {
                         loading="lazy"
                         className="h-full w-full object-cover group-hover:scale-[1.04] transition-transform duration-300"
                       />
-                  ) : (
-                    <div className="h-full flex items-center justify-center">
-                      <Icon className="h-10 w-10 text-muted-foreground" />
-                    </div>
-                  )}
-                  <div
-                    className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Button
-                      size="icon"
-                      variant="secondary"
-                      className="h-8 w-8"
-                      onClick={() => setSelected(m)}
-                      title="Preview"
+                    ) : (
+                      <div className="h-full flex items-center justify-center">
+                        <Icon className="h-10 w-10 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div
+                      className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5"
+                      onClick={(e) => e.stopPropagation()}
                     >
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="secondary"
-                      className="h-8 w-8"
-                      title="Copy URL"
-                      onClick={() => {
-                        navigator.clipboard.writeText(
-                          m.url.startsWith("http")
-                            ? m.url
-                            : window.location.origin + m.url,
-                        );
-                        toast.success("URL copied");
-                      }}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="secondary"
-                      className="h-8 w-8"
-                      title="Download"
-                      onClick={() => {
-                        const a = document.createElement("a");
-                        a.href = m.url;
-                        a.download = m.name;
-                        a.target = "_blank";
-                        a.click();
-                      }}
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
-                    {can("media.delete") && (
                       <Button
                         size="icon"
                         variant="secondary"
-                        className="h-8 w-8 text-rose-600"
-                        title="Delete"
-                        onClick={() => setConfirmDel(m)}
+                        className="h-8 w-8"
+                        onClick={() => setSelected(m)}
+                        title="Preview"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Eye className="h-4 w-4" />
                       </Button>
-                    )}
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        className="h-8 w-8"
+                        title="Copy URL"
+                        onClick={() => {
+                          navigator.clipboard.writeText(
+                            m.url.startsWith("http")
+                              ? m.url
+                              : window.location.origin + m.url,
+                          );
+                          toast.success("URL copied");
+                        }}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        className="h-8 w-8"
+                        title="Download"
+                        onClick={() => {
+                          const a = document.createElement("a");
+                          a.href = m.url;
+                          a.download = m.name;
+                          a.target = "_blank";
+                          a.click();
+                        }}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      {can("media.delete") && (
+                        <Button
+                          size="icon"
+                          variant="secondary"
+                          className="h-8 w-8 text-rose-600"
+                          title="Delete"
+                          onClick={() => setConfirmDel(m)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <CardContent className="p-3">
-                  <p className="text-[12.5px] font-medium truncate">{m.name}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    {m.dimensions?.width
-                      ? m.dimensions.width + "×" + m.dimensions.height + " · "
-                      : ""}
-                    {fmtNum(Math.round(m.size / 1024))} KB · {m.format || "—"}
-                  </p>
-                  <div className="mt-2 flex items-center justify-between">
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] font-normal"
-                    >
-                      {m.folder}
-                    </Badge>
-                    {(m.usedIn || []).length > 0 && (
-                      <span className="text-[10.5px] text-muted-foreground">
-                        Used in {m.usedIn.length} blog
-                        {m.usedIn.length > 1 ? "s" : ""}
-                      </span>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+                  <CardContent className="p-3">
+                    <p className="text-[12.5px] font-medium truncate">
+                      {m.name}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {m.dimensions?.width
+                        ? m.dimensions.width + "×" + m.dimensions.height + " · "
+                        : ""}
+                      {fmtNum(Math.round(m.size / 1024))} KB · {m.format || "—"}
+                    </p>
+                    <div className="mt-2 flex items-center justify-between">
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-normal"
+                      >
+                        {m.folder}
+                      </Badge>
+                      {(m.usedIn || []).length > 0 && (
+                        <span className="text-[10.5px] text-muted-foreground">
+                          Used in {m.usedIn.length} blog
+                          {m.usedIn.length > 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {hasMore && (
+            <div
+              ref={loadMoreRef}
+              className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground"
+            >
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <span className="text-xs text-muted-foreground font-medium">
+                Loading more media...
+              </span>
+            </div>
+          )}
+
+          {!hasMore && total > pageSize && (
+            <div className="text-center py-8 text-xs text-muted-foreground/80 font-medium">
+              ✨ All {total} media items loaded
+            </div>
+          )}
         </div>
-
-        {filteredMedia.length > displayCount && (
-          <div
-            ref={loadMoreRef}
-            className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground"
-          >
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            <span className="text-xs text-muted-foreground font-medium">Loading more media...</span>
-          </div>
-        )}
-
-        {filteredMedia.length > 36 && filteredMedia.length <= displayCount && (
-          <div className="text-center py-8 text-xs text-muted-foreground/80 font-medium">
-            ✨ All {filteredMedia.length} media items loaded
-          </div>
-        )}
-      </div>
-    )}
+      )}
 
       {/* Details drawer */}
       <Sheet open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
@@ -803,7 +828,11 @@ function MediaDrawer({
               <button
                 key={i}
                 onClick={() => {
-                  swrMutate("/api/blogs/" + u.blogId, (prev) => prev || { id: u.blogId, title: u.title }, false);
+                  swrMutate(
+                    "/api/blogs/" + u.blogId,
+                    (prev) => prev || { id: u.blogId, title: u.title },
+                    false,
+                  );
                   navigate("blog", { id: u.blogId });
                 }}
                 className="w-full flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-left hover:bg-accent transition-colors"

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import useSWR, { mutate } from "swr";
 import {
   Search,
@@ -26,29 +27,88 @@ import { EmptyState } from "@/components/bits";
 import { fetcher } from "@/lib/client";
 import Sidebar, { navTitle } from "@/components/Sidebar";
 import Header from "@/components/Header";
-import Dashboard from "@/components/views/Dashboard";
-import Blogs from "@/components/views/Blogs";
-import BlogEditor from "@/components/views/BlogEditor";
-import BlogDetail from "@/components/views/BlogDetail";
-import Media from "@/components/views/Media";
-import Keywords from "@/components/views/Keywords";
-import Team from "@/components/views/Team";
-import Roles from "@/components/views/Roles";
-import ActivityView from "@/components/views/ActivityView";
-import {
-  SeoOverview,
-  SeoIssues,
-  ContentOptimization,
-} from "@/components/views/SeoViews";
-import AnalyticsView from "@/components/views/AnalyticsView";
-import ScheduleView from "@/components/views/ScheduleView";
-import SettingsView from "@/components/views/SettingsView";
 import LoginForm from "@/components/LoginForm";
 import { useTheme } from "next-themes";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 
 dayjs.extend(relativeTime);
+
+function ViewLoading() {
+  return (
+    <div
+      className="min-h-[240px] animate-pulse rounded-md bg-muted/40"
+      role="status"
+      aria-label="Loading view"
+    />
+  );
+}
+
+const Dashboard = dynamic(() => import("@/components/views/Dashboard"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const Blogs = dynamic(() => import("@/components/views/Blogs"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const BlogEditor = dynamic(() => import("@/components/views/BlogEditor"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const BlogDetail = dynamic(() => import("@/components/views/BlogDetail"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const Media = dynamic(() => import("@/components/views/Media"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const Keywords = dynamic(() => import("@/components/views/Keywords"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const Team = dynamic(() => import("@/components/views/Team"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const Roles = dynamic(() => import("@/components/views/Roles"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const ActivityView = dynamic(() => import("@/components/views/ActivityView"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const SeoOverview = dynamic(
+  () =>
+    import("@/components/views/SeoViews").then((module) => module.SeoOverview),
+  { ssr: false, loading: ViewLoading },
+);
+const SeoIssues = dynamic(
+  () =>
+    import("@/components/views/SeoViews").then((module) => module.SeoIssues),
+  { ssr: false, loading: ViewLoading },
+);
+const ContentOptimization = dynamic(
+  () =>
+    import("@/components/views/SeoViews").then(
+      (module) => module.ContentOptimization,
+    ),
+  { ssr: false, loading: ViewLoading },
+);
+const AnalyticsView = dynamic(
+  () => import("@/components/views/AnalyticsView"),
+  { ssr: false, loading: ViewLoading },
+);
+const ScheduleView = dynamic(() => import("@/components/views/ScheduleView"), {
+  ssr: false,
+  loading: ViewLoading,
+});
+const SettingsView = dynamic(() => import("@/components/views/SettingsView"), {
+  ssr: false,
+  loading: ViewLoading,
+});
 
 function readViewFromLocation() {
   const segments = window.location.pathname.split("/").filter(Boolean);
@@ -67,6 +127,8 @@ export default function App() {
     if (typeof window === "undefined") return { name: "dashboard", params: {} };
     return readViewFromLocation();
   });
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -117,7 +179,15 @@ export default function App() {
   }, [statsMutate, issuesMutate, notifMutate]);
 
   const navigate = useCallback((name, params) => {
-    const nextParams = params || {};
+    const nextParams = { ...(params || {}) };
+    if ((name === "blog" || name === "editor") && !nextParams.returnView) {
+      const current = viewRef.current;
+      if (current.name === "blog" || current.name === "editor") {
+        nextParams.returnView = current.params?.returnView;
+      } else {
+        nextParams.returnView = current.name;
+      }
+    }
     const query = new URLSearchParams();
     Object.entries(nextParams).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") {
@@ -130,12 +200,18 @@ export default function App() {
       "",
       pathname + (query.toString() ? "?" + query.toString() : ""),
     );
-    setView({ name, params: nextParams });
+    const nextView = { name, params: nextParams };
+    viewRef.current = nextView;
+    setView(nextView);
     window.scrollTo(0, 0);
   }, []);
 
   useEffect(() => {
-    const restoreView = () => setView(readViewFromLocation());
+    const restoreView = () => {
+      const nextView = readViewFromLocation();
+      viewRef.current = nextView;
+      setView(nextView);
+    };
     window.addEventListener("popstate", restoreView);
     return () => window.removeEventListener("popstate", restoreView);
   }, []);
@@ -295,7 +371,14 @@ export default function App() {
           return accessDenied(
             "Your role does not have permission to view blog details.",
           );
-        return <BlogDetail blogId={p.id} navigate={navigate} can={can} />;
+        return (
+          <BlogDetail
+            blogId={p.id}
+            returnView={p.returnView}
+            navigate={navigate}
+            can={can}
+          />
+        );
       case "media":
         if (!can("media.view"))
           return accessDenied(
@@ -339,11 +422,7 @@ export default function App() {
             "Your role does not have permission to view analytics.",
           );
         return (
-          <AnalyticsView
-            initialTab={p.tab}
-            key={p.tab}
-            navigate={navigate}
-          />
+          <AnalyticsView initialTab={p.tab} key={p.tab} navigate={navigate} />
         );
       case "team":
         if (!can("team.view"))
@@ -400,6 +479,7 @@ export default function App() {
         user={user}
         setUser={setUser}
         focus={view.params?.focus}
+        returnView={view.params?.returnView}
         key={(view.params?.id || "new") + (view.params?.focus || "")}
       />
     );
