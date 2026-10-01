@@ -54,7 +54,7 @@ export default function AnalyticsView({ initialTab, navigate }) {
   const [indexFilter, setIndexFilter] = useState("all");
   const { data, error } = useSWR("/api/analytics?range=" + range, fetcher);
   const { data: indexData, isLoading: indexLoading } = useSWR(
-    "/api/indexing",
+    tab === "indexing" ? "/api/indexing" : null,
     fetcher,
   );
 
@@ -158,7 +158,10 @@ export default function AnalyticsView({ initialTab, navigate }) {
             <TabsTrigger value="search" className="text-xs px-3">
               Search
             </TabsTrigger>
-            <TabsTrigger value="indexing" className="text-xs px-3 flex items-center gap-1.5">
+            <TabsTrigger
+              value="indexing"
+              className="text-xs px-3 flex items-center gap-1.5"
+            >
               <Globe className="h-3.5 w-3.5 text-violet-500" />
               Google Indexing
             </TabsTrigger>
@@ -437,7 +440,9 @@ export default function AnalyticsView({ initialTab, navigate }) {
                   <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <p className="text-2xl font-bold tabular-nums mt-1 text-emerald-800 dark:text-emerald-200">
-                  {indexLoading ? "…" : `${indexData?.summary?.indexed || 0} / ${indexData?.summary?.total || 0}`}
+                  {indexLoading
+                    ? "…"
+                    : `${indexData?.summary?.indexed || 0} / ${indexData?.summary?.total || 0}`}
                 </p>
                 <p className="text-[11.5px] text-muted-foreground mt-0.5">
                   {indexLoading
@@ -476,7 +481,8 @@ export default function AnalyticsView({ initialTab, navigate }) {
                   {indexData?.summary?.siteUrl || "Connected via GSC"}
                 </p>
                 <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> API Connected (Service Account)
+                  <CheckCircle2 className="h-3.5 w-3.5" /> API Connected
+                  (Service Account)
                 </div>
               </CardContent>
             </Card>
@@ -550,130 +556,135 @@ export default function AnalyticsView({ initialTab, navigate }) {
                 </div>
               ) : (indexData?.items || []).length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
-                  No published blogs found. Publish blogs to see their Google indexing status.
+                  No published blogs found. Publish blogs to see their Google
+                  indexing status.
                 </div>
-              ) : (() => {
-                const filtered = (indexData?.items || []).filter((item) => {
-                  if (indexFilter === "indexed" && !item.isIndexed) return false;
-                  if (indexFilter === "pending" && item.isIndexed) return false;
-                  if (indexSearch.trim()) {
-                    const q = indexSearch.toLowerCase();
+              ) : (
+                (() => {
+                  const filtered = (indexData?.items || []).filter((item) => {
+                    if (indexFilter === "indexed" && !item.isIndexed)
+                      return false;
+                    if (indexFilter === "pending" && item.isIndexed)
+                      return false;
+                    if (indexSearch.trim()) {
+                      const q = indexSearch.toLowerCase();
+                      return (
+                        item.title?.toLowerCase().includes(q) ||
+                        item.slug?.toLowerCase().includes(q)
+                      );
+                    }
+                    return true;
+                  });
+
+                  if (filtered.length === 0) {
                     return (
-                      item.title?.toLowerCase().includes(q) ||
-                      item.slug?.toLowerCase().includes(q)
+                      <div className="p-8 text-center text-sm text-muted-foreground">
+                        No blogs match your filter criteria.
+                      </div>
                     );
                   }
-                  return true;
-                });
 
-                if (filtered.length === 0) {
                   return (
-                    <div className="p-8 text-center text-sm text-muted-foreground">
-                      No blogs match your filter criteria.
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-border/60 bg-muted/30 text-muted-foreground">
+                            <th className="text-left font-semibold px-4 py-2.5">
+                              Blog
+                            </th>
+                            <th className="text-left font-semibold px-3 py-2.5">
+                              Published
+                            </th>
+                            <th className="text-left font-semibold px-3 py-2.5">
+                              Index Status
+                            </th>
+                            <th className="text-right font-semibold px-3 py-2.5">
+                              Impressions
+                            </th>
+                            <th className="text-right font-semibold px-3 py-2.5">
+                              Clicks
+                            </th>
+                            <th className="text-right font-semibold px-4 py-2.5">
+                              Avg Position
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/60">
+                          {filtered.map((item) => (
+                            <tr
+                              key={item.id}
+                              className="hover:bg-accent/40 transition-colors"
+                            >
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  {item.featuredImage ? (
+                                    <img
+                                      src={item.featuredImage}
+                                      alt={item.title}
+                                      className="w-10 h-10 rounded-lg object-cover border border-border shrink-0 shadow-xs"
+                                    />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center border border-border shrink-0 text-muted-foreground">
+                                      <ImageIcon className="h-4 w-4" />
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 max-w-[260px] sm:max-w-[320px]">
+                                    <p
+                                      onClick={() =>
+                                        navigate?.("blog", { id: item.id })
+                                      }
+                                      className="font-medium text-[13px] truncate text-foreground hover:text-primary transition-colors cursor-pointer"
+                                      title={item.title}
+                                    >
+                                      {item.title}
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground truncate font-mono">
+                                      /blogs/{item.slug}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
+                                {fmtDate(item.publishedAt)}
+                              </td>
+                              <td className="px-3 py-3 whitespace-nowrap">
+                                {item.isIndexed ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 gap-1 font-medium text-[11px]"
+                                  >
+                                    <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                                    Indexed
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 gap-1 font-medium text-[11px]"
+                                  >
+                                    <AlertCircle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                                    Pending Crawl
+                                  </Badge>
+                                )}
+                              </td>
+                              <td className="px-3 py-3 text-right tabular-nums font-semibold">
+                                {item.impressions > 0
+                                  ? fmtNum(item.impressions)
+                                  : "—"}
+                              </td>
+                              <td className="px-3 py-3 text-right tabular-nums">
+                                {item.clicks > 0 ? fmtNum(item.clicks) : "—"}
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums font-medium">
+                                {item.position > 0 ? `#${item.position}` : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   );
-                }
-
-                return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-border/60 bg-muted/30 text-muted-foreground">
-                          <th className="text-left font-semibold px-4 py-2.5">
-                            Blog
-                          </th>
-                          <th className="text-left font-semibold px-3 py-2.5">
-                            Published
-                          </th>
-                          <th className="text-left font-semibold px-3 py-2.5">
-                            Index Status
-                          </th>
-                          <th className="text-right font-semibold px-3 py-2.5">
-                            Impressions
-                          </th>
-                          <th className="text-right font-semibold px-3 py-2.5">
-                            Clicks
-                          </th>
-                          <th className="text-right font-semibold px-4 py-2.5">
-                            Avg Position
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/60">
-                        {filtered.map((item) => (
-                          <tr
-                            key={item.id}
-                            className="hover:bg-accent/40 transition-colors"
-                          >
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-3">
-                                {item.featuredImage ? (
-                                  <img
-                                    src={item.featuredImage}
-                                    alt={item.title}
-                                    className="w-10 h-10 rounded-lg object-cover border border-border shrink-0 shadow-xs"
-                                  />
-                                ) : (
-                                  <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center border border-border shrink-0 text-muted-foreground">
-                                    <ImageIcon className="h-4 w-4" />
-                                  </div>
-                                )}
-                                <div className="min-w-0 max-w-[260px] sm:max-w-[320px]">
-                                  <p
-                                    onClick={() =>
-                                      navigate?.("blog", { id: item.id })
-                                    }
-                                    className="font-medium text-[13px] truncate text-foreground hover:text-primary transition-colors cursor-pointer"
-                                    title={item.title}
-                                  >
-                                    {item.title}
-                                  </p>
-                                  <p className="text-[11px] text-muted-foreground truncate font-mono">
-                                    /blogs/{item.slug}
-                                  </p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
-                              {fmtDate(item.publishedAt)}
-                            </td>
-                            <td className="px-3 py-3 whitespace-nowrap">
-                              {item.isIndexed ? (
-                                <Badge
-                                  variant="outline"
-                                  className="bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 gap-1 font-medium text-[11px]"
-                                >
-                                  <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                                  Indexed
-                                </Badge>
-                              ) : (
-                                <Badge
-                                  variant="outline"
-                                  className="bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 gap-1 font-medium text-[11px]"
-                                >
-                                  <AlertCircle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                                  Pending Crawl
-                                </Badge>
-                              )}
-                            </td>
-                            <td className="px-3 py-3 text-right tabular-nums font-semibold">
-                              {item.impressions > 0
-                                ? fmtNum(item.impressions)
-                                : "—"}
-                            </td>
-                            <td className="px-3 py-3 text-right tabular-nums">
-                              {item.clicks > 0 ? fmtNum(item.clicks) : "—"}
-                            </td>
-                            <td className="px-4 py-3 text-right tabular-nums font-medium">
-                              {item.position > 0 ? `#${item.position}` : "—"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })()}
+                })()
+              )}
             </CardContent>
           </Card>
         </div>
