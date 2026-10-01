@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import useSWR from "swr";
+import useSWR, { mutate as swrMutate, preload } from "swr";
 import {
   FileText,
   Globe,
@@ -155,11 +155,23 @@ export default function Dashboard({ user, navigate, can }) {
   })();
 
   const blogActions = (b) => [
-    { label: "View", icon: Eye, onClick: () => navigate("blog", { id: b.id }) },
+    {
+      label: "View",
+      icon: Eye,
+      onClick: () => {
+        preload("/api/blogs/" + b.id, fetcher);
+        swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+        navigate("blog", { id: b.id });
+      },
+    },
     {
       label: "Edit",
       icon: Pencil,
-      onClick: () => navigate("editor", { id: b.id }),
+      onClick: () => {
+        preload("/api/blogs/" + b.id, fetcher);
+        swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+        navigate("editor", { id: b.id });
+      },
     },
     {
       label: "Duplicate",
@@ -461,11 +473,17 @@ export default function Dashboard({ user, navigate, can }) {
                     <tr
                       key={b.id}
                       className="border-b border-border/60 last:border-0 hover:bg-accent/40 transition-colors group"
+                      onMouseEnter={() => {
+                        if (b?.id) preload("/api/blogs/" + b.id, fetcher);
+                      }}
                     >
                       <td className="px-4 py-3">
                         <button
                           className="flex items-center gap-3 text-left"
-                          onClick={() => navigate("blog", { id: b.id })}
+                          onClick={() => {
+                            swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+                            navigate("blog", { id: b.id });
+                          }}
                         >
                           {b.featuredImage?.url ? (
                             <img

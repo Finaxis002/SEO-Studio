@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import useSWR from "swr";
+import { useEffect, useMemo, useState } from "react";
+import useSWR, { mutate as swrMutate, preload } from "swr";
 import { toast } from "sonner";
 import {
   ChevronLeft,
@@ -37,10 +37,6 @@ export default function ScheduleView({ navigate, can }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [resched, setResched] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
-  const { data: blogs, mutate } = useSWR(
-    "/api/blogs?limit=100&status=scheduled,published",
-    fetcher,
-  );
 
   const month = useMemo(
     () =>
@@ -53,6 +49,52 @@ export default function ScheduleView({ navigate, can }) {
   );
   const year = month.getFullYear(),
     mon = month.getMonth();
+
+  const fromDate = useMemo(
+    () => dayjs(month).startOf("month").toISOString(),
+    [month],
+  );
+  const toDate = useMemo(
+    () => dayjs(month).endOf("month").toISOString(),
+    [month],
+  );
+
+  const calendarQuery = useMemo(
+    () =>
+      `/api/blogs?limit=500&status=scheduled,published&fields=calendar&from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`,
+    [fromDate, toDate],
+  );
+
+  const { data: blogs, mutate } = useSWR(calendarQuery, fetcher, {
+    keepPreviousData: true,
+  });
+
+  // Preload Next & Previous Months in background for 0ms instant month switching
+  useEffect(() => {
+    const nextM = new Date(year, mon + 1, 1);
+    const prevM = new Date(year, mon - 1, 1);
+    const nextFrom = dayjs(nextM).startOf("month").toISOString();
+    const nextTo = dayjs(nextM).endOf("month").toISOString();
+    const prevFrom = dayjs(prevM).startOf("month").toISOString();
+    const prevTo = dayjs(prevM).endOf("month").toISOString();
+
+    preload(
+      `/api/blogs?limit=500&status=scheduled,published&fields=calendar&from=${encodeURIComponent(nextFrom)}&to=${encodeURIComponent(nextTo)}`,
+      fetcher,
+    );
+    preload(
+      `/api/blogs?limit=500&status=scheduled,published&fields=calendar&from=${encodeURIComponent(prevFrom)}&to=${encodeURIComponent(prevTo)}`,
+      fetcher,
+    );
+  }, [year, mon]);
+
+  const openBlog = (b) => {
+    if (b?.id) {
+      preload("/api/blogs/" + b.id, fetcher);
+      swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+    }
+    navigate("blog", { id: b.id });
+  };
   const firstDay = new Date(year, mon, 1);
   const startWeekday = (firstDay.getDay() + 6) % 7;
   const daysInMonth = new Date(year, mon + 1, 0).getDate();
@@ -95,6 +137,7 @@ export default function ScheduleView({ navigate, can }) {
             variant="outline"
             size="icon"
             onClick={() => setMonthOffset(monthOffset - 1)}
+            title="Previous Month"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -105,6 +148,7 @@ export default function ScheduleView({ navigate, can }) {
             variant="outline"
             size="icon"
             onClick={() => setMonthOffset(monthOffset + 1)}
+            title="Next Month"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -127,33 +171,67 @@ export default function ScheduleView({ navigate, can }) {
             {cells.map((day, i) => {
               const evs = eventsByDay(day);
               const isToday = day && dayjs(day).isSame(dayjs(), "day");
+              const pubCount = evs.filter((b) => b.status === "published").length;
+              const schedCount = evs.filter((b) => b.status === "scheduled").length;
+
               return (
                 <div
                   key={i}
+                  onClick={() => {
+                    if (day && evs.length > 0) {
+                      setSelectedDay({ date: day, events: evs });
+                    }
+                  }}
                   className={
-                    "min-h-[92px] rounded-lg border p-1.5 " +
+                    "min-h-[96px] rounded-lg border p-1.5 flex flex-col justify-between " +
                     (day
-                      ? "border-border bg-card"
+                      ? "border-border bg-card " + (evs.length > 0 ? "cursor-pointer hover:border-violet-300 dark:hover:border-violet-700 transition-colors" : "")
                       : "border-transparent bg-muted/20")
                   }
                 >
                   {day && (
                     <>
-                      <span
-                        className={
-                          "text-[11px] font-bold " +
-                          (isToday
-                            ? "text-white bg-violet-600 rounded-full w-5 h-5 inline-flex items-center justify-center"
-                            : "text-muted-foreground")
-                        }
-                      >
-                        {day.getDate()}
-                      </span>
+                      <div className="flex items-center justify-between mb-1">
+                        <span
+                          className={
+                            "text-[11px] font-bold " +
+                            (isToday
+                              ? "text-white bg-violet-600 rounded-full w-5 h-5 inline-flex items-center justify-center"
+                              : "text-muted-foreground")
+                          }
+                        >
+                          {day.getDate()}
+                        </span>
+
+                        {/* Accurate counts for published & scheduled on this day */}
+                        <div className="flex items-center gap-1">
+                          {pubCount > 0 && (
+                            <span
+                              title={`${pubCount} Published`}
+                              className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            >
+                              🟢 {pubCount}
+                            </span>
+                          )}
+                          {schedCount > 0 && (
+                            <span
+                              title={`${schedCount} Scheduled`}
+                              className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300"
+                            >
+                              ⏰ {schedCount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
                       <div className="mt-1 space-y-1">
                         {evs.slice(0, 2).map((b) => (
                           <button
                             key={b.id}
-                            onClick={() => navigate("blog", { id: b.id })}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openBlog(b);
+                            }}
                             className={
                               "w-full text-left text-[10px] font-medium rounded px-1.5 py-1 truncate block " +
                               (b.status === "scheduled"
@@ -161,7 +239,7 @@ export default function ScheduleView({ navigate, can }) {
                                 : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300")
                             }
                           >
-                            {b.status === "scheduled" ? "⏰ " : ""}
+                            {b.status === "scheduled" ? "⏰ " : "🟢 "}
                             {b.title}
                           </button>
                         ))}
@@ -188,8 +266,24 @@ export default function ScheduleView({ navigate, can }) {
       </Card>
 
       <Card className="card-hover overflow-hidden">
-        <div className="px-4 py-3 border-b border-border font-semibold text-[14px]">
-          This month ({monthEvents.length})
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between font-semibold text-[14px]">
+          <span>This month ({monthEvents.length})</span>
+          {monthEvents.length > 0 && (
+            <div className="flex items-center gap-3 text-xs font-normal text-muted-foreground">
+              {monthEvents.filter((b) => b.status === "published").length > 0 && (
+                <span className="flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
+                  {monthEvents.filter((b) => b.status === "published").length} published
+                </span>
+              )}
+              {monthEvents.filter((b) => b.status === "scheduled").length > 0 && (
+                <span className="flex items-center gap-1 font-medium text-violet-700 dark:text-violet-400">
+                  <span className="h-2 w-2 rounded-full bg-violet-500 inline-block" />
+                  {monthEvents.filter((b) => b.status === "scheduled").length} scheduled
+                </span>
+              )}
+            </div>
+          )}
         </div>
         {monthEvents.length === 0 ? (
           <EmptyState
@@ -210,7 +304,7 @@ export default function ScheduleView({ navigate, can }) {
                   <Globe className="h-4 w-4 text-emerald-500" />
                 )}
                 <button
-                  onClick={() => navigate("blog", { id: b.id })}
+                  onClick={() => openBlog(b)}
                   className="text-[13px] font-medium flex-1 text-left truncate hover:text-primary transition-colors"
                 >
                   {b.title}
@@ -230,13 +324,21 @@ export default function ScheduleView({ navigate, can }) {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
-                        onClick={() => navigate("editor", { id: b.id })}
+                        onClick={() => {
+                          preload("/api/blogs/" + b.id, fetcher);
+                          swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+                          navigate("editor", { id: b.id });
+                        }}
                       >
                         <Pencil className="h-4 w-4 mr-2" />
                         Edit
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onClick={() => navigate("blog", { id: b.id })}
+                        onClick={() => {
+                          preload("/api/blogs/" + b.id, fetcher);
+                          swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+                          navigate("blog", { id: b.id });
+                        }}
                       >
                         <Eye className="h-4 w-4 mr-2" />
                         Preview
@@ -331,7 +433,7 @@ export default function ScheduleView({ navigate, can }) {
                     <button
                       onClick={() => {
                         setSelectedDay(null);
-                        navigate("blog", { id: b.id });
+                        openBlog(b);
                       }}
                       className="text-sm font-medium text-left truncate block hover:text-primary transition-colors hover:underline w-full"
                       title={b.title}
@@ -353,6 +455,8 @@ export default function ScheduleView({ navigate, can }) {
                     size="sm"
                     className="h-8 px-2 text-xs"
                     onClick={() => {
+                      preload("/api/blogs/" + b.id, fetcher);
+                      swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
                       setSelectedDay(null);
                       navigate("editor", { id: b.id });
                     }}

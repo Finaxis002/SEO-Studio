@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import useSWR from "swr";
+import useSWR, { mutate as swrMutate, preload } from "swr";
 import { toast } from "sonner";
 import {
   Search,
@@ -136,9 +136,34 @@ export default function Blogs({ statusFilter, navigate, can }) {
   const items = data?.items || [];
   const counts = data?.counts || savedCounts;
 
+  // Preload immediately next page in background so clicking 'Next' is 0ms instant
+  useEffect(() => {
+    if (data?.pages && page < data.pages) {
+      const p = new URLSearchParams();
+      if (q) p.set("q", q);
+      if (status !== "all") p.set("status", status);
+      if (author !== "all") p.set("author", author);
+      if (category !== "all") p.set("category", category);
+      if (band !== "all") p.set("seoBand", band);
+      p.set("sort", sort);
+      p.set("page", String(page + 1));
+      p.set("limit", String(limit));
+      preload("/api/blogs?" + p.toString(), fetcher);
+    }
+  }, [data?.pages, page, q, status, author, category, band, sort, limit]);
+
   const refresh = () => {
     mutate();
     window.dispatchEvent(new Event("ss-refresh"));
+  };
+
+
+  const openBlog = (b) => {
+    if (b?.id) {
+      preload("/api/blogs/" + b.id, fetcher);
+      swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+    }
+    navigate("blog", { id: b.id });
   };
 
   const actionsFor = (b) => {
@@ -149,7 +174,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
         label: "View in Studio",
         icon: Eye,
         show: true,
-        onClick: () => navigate("blog", { id: b.id }),
+        onClick: () => openBlog(b),
       },
       {
         label: "View on Vinimay",
@@ -161,7 +186,11 @@ export default function Blogs({ statusFilter, navigate, can }) {
         label: "Edit",
         icon: Pencil,
         show: can("blogs.edit"),
-        onClick: () => navigate("editor", { id: b.id }),
+        onClick: () => {
+          preload("/api/blogs/" + b.id, fetcher);
+          swrMutate("/api/blogs/" + b.id, (prev) => prev || b, false);
+          navigate("editor", { id: b.id });
+        },
       },
       {
         label: "Approve Blog",
@@ -590,7 +619,10 @@ export default function Blogs({ statusFilter, navigate, can }) {
                     <tr
                       key={b.id}
                       className="border-b border-border/60 last:border-0 hover:bg-accent/40 transition-colors group cursor-pointer"
-                      onClick={() => navigate("blog", { id: b.id })}
+                      onMouseEnter={() => {
+                        if (b?.id) preload("/api/blogs/" + b.id, fetcher);
+                      }}
+                      onClick={() => openBlog(b)}
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">

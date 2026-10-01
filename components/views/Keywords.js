@@ -30,7 +30,17 @@ export default function Keywords({ navigate, can }) {
   const [nk, setNk] = useState({ keyword: '', volume: '', difficulty: '', position: '' })
   const [syncingGsc, setSyncingGsc] = useState(false)
 
-  const { data: keywords, error, mutate } = useSWR('/api/keywords?q=' + encodeURIComponent(q), fetcher)
+  const { data: allKeywords, error, mutate } = useSWR('/api/keywords', fetcher)
+
+  const keywords = useMemo(() => {
+    if (!allKeywords) return null
+    if (!q.trim()) return allKeywords
+    const lower = q.toLowerCase()
+    return allKeywords.filter((k) =>
+      (k.keyword || '').toLowerCase().includes(lower) ||
+      (k.targetUrl || '').toLowerCase().includes(lower)
+    )
+  }, [allKeywords, q])
 
   const syncGsc = async () => {
     setSyncingGsc(true)
