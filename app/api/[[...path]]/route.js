@@ -442,7 +442,7 @@ async function checkAndPublishScheduled(db) {
         .collection("blogs")
         .find(
           { status: "scheduled", scheduledAt: { $lte: now } },
-          { projection: { id: 1, title: 1 } },
+          { projection: { id: 1, title: 1, translations: 1 } },
         )
         .limit(100)
         .toArray();
@@ -496,6 +496,37 @@ async function checkAndPublishScheduled(db) {
             )
             .catch(() => {}),
         ]);
+
+        // Auto-translate blogs that are missing translations (background, non-blocking)
+        const blogsNeedingTranslation = scheduledBlogs
+          .slice(0, publishedCount)
+          .filter((b) => !b.translations?.hi?.title);
+
+        if (blogsNeedingTranslation.length > 0) {
+          (async () => {
+            for (const blog of blogsNeedingTranslation) {
+              try {
+                // Fetch full content for translation
+                const fullBlog = await db
+                  .collection("blogs")
+                  .findOne({ id: blog.id });
+                if (!fullBlog) continue;
+                const translations = await translateBlog(
+                  fullBlog,
+                  DEFAULT_TARGET_LANGS,
+                );
+                await db
+                  .collection("blogs")
+                  .updateOne({ id: blog.id }, { $set: { translations } });
+              } catch (err) {
+                console.error(
+                  `Auto-translate failed for scheduled blog "${blog.title}":`,
+                  err.message,
+                );
+              }
+            }
+          })();
+        }
         invalidateCache(
           "stats",
           "seoIssues",
