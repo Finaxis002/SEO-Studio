@@ -35,6 +35,8 @@ import {
   verifyPassword,
 } from "../../../lib/auth";
 
+import { handleKbRoute } from "../../../lib/kb-handler";
+
 function handleCORS(response, request) {
   const origin = request?.headers?.get("origin");
   if (
@@ -535,6 +537,20 @@ async function checkAndPublishScheduled(db) {
           "calendar",
         );
       }
+
+      // Also auto-publish any due scheduled Knowledge Base guides
+      const dueKbArticles = await db
+        .collection("kb_articles")
+        .find({ status: "scheduled", scheduledAt: { $lte: now } })
+        .toArray();
+      if (dueKbArticles.length > 0) {
+        await db
+          .collection("kb_articles")
+          .updateMany(
+            { status: "scheduled", scheduledAt: { $lte: now } },
+            { $set: { status: "published", publishedAt: now, updatedAt: now } },
+          );
+      }
     }
   } catch (err) {
     console.error("Scheduled publishing check error:", err);
@@ -783,6 +799,21 @@ async function handleRoute(request, { params }) {
         time: new Date().toISOString(),
       }),
     );
+  }
+
+  // ---------- KNOWLEDGE BASE (Modular API Handler) ----------
+  if (path[0] === "kb" || (path[0] === "public" && path[1] === "kb")) {
+    let currentUser = null;
+    let currentCan = () => true;
+    try {
+      currentUser = await getUser(request, db);
+      if (currentUser) {
+        const perms = await getPerms(db, currentUser);
+        currentCan = (key) => perms.includes("*") || perms.includes(key);
+      }
+    } catch {}
+    // Next.js hot-reload trigger for KB
+    return handleKbRoute(request, path, method, currentUser, currentCan, db);
   }
 
   // ---------- PUBLIC BLOG API (For Vinimay Website & Readers) ----------

@@ -27,6 +27,9 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Sparkles,
+  BookOpen,
+  FolderOpen,
+  PlusCircle,
 } from "lucide-react";
 
 import {
@@ -117,6 +120,33 @@ export const NAV = [
         params: {
           status: "archived",
         },
+      },
+    ],
+  },
+  {
+    group: "Knowledge Base",
+    items: [
+      {
+        key: "kb",
+        label: "All Guides",
+        icon: BookOpen,
+        perm: "blogs.view",
+      },
+      {
+        key: "create-kb",
+        label: "Create Guide",
+        icon: PlusCircle,
+        perm: "blogs.create",
+        view: {
+          name: "kb-editor",
+          articleId: "new",
+        },
+      },
+      {
+        key: "kb-categories",
+        label: "KB Categories",
+        icon: FolderOpen,
+        perm: "blogs.view",
       },
     ],
   },
@@ -247,6 +277,20 @@ export function navTitle(view) {
   }
   if (view.name === "blog") {
     return "Blog Detail";
+  }
+  if (view.name === "kb-editor") {
+    return view.params?.articleId && view.params.articleId !== "new"
+      ? "Edit Guide"
+      : "Create New Guide";
+  }
+  if (view.name === "kb-detail") {
+    return "Guide Detail";
+  }
+  if (view.name === "kb") {
+    return "Knowledge Base Guides";
+  }
+  if (view.name === "kb-categories") {
+    return "Knowledge Base Categories";
   }
 
   for (const g of NAV) {

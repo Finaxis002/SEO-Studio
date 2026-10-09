@@ -109,6 +109,22 @@ const SettingsView = dynamic(() => import("@/components/views/SettingsView"), {
   ssr: false,
   loading: ViewLoading,
 });
+const KnowledgeBaseView = dynamic(
+  () => import("@/components/views/KnowledgeBaseView"),
+  { ssr: false, loading: ViewLoading },
+);
+const ArticleEditor = dynamic(
+  () => import("@/components/views/ArticleEditor"),
+  { ssr: false, loading: ViewLoading },
+);
+const KbDetail = dynamic(
+  () => import("@/components/views/KbDetail"),
+  { ssr: false, loading: ViewLoading },
+);
+const KbCategoriesView = dynamic(
+  () => import("@/components/views/KbCategoriesView"),
+  { ssr: false, loading: ViewLoading },
+);
 
 function readViewFromLocation() {
   const segments = window.location.pathname.split("/").filter(Boolean);
@@ -453,10 +469,37 @@ export default function App() {
           />
         );
       }
+      case "kb":
+        return <KnowledgeBaseView navigate={navigate} can={can} />;
+      case "kb-detail":
+        return (
+          <KbDetail
+            articleId={p.articleId || p.id}
+            returnView={p.returnView || "kb"}
+            navigate={navigate}
+            can={can}
+          />
+        );
+      case "kb-categories":
+        return <KbCategoriesView navigate={navigate} can={can} />;
       default:
         return <Dashboard user={user} navigate={navigate} can={can} />;
     }
   };
+
+  // Full-screen Knowledge Base editor
+  if (view.name === "kb-editor") {
+    return (
+      <div className="min-h-screen bg-background p-4 lg:p-6">
+        <ArticleEditor
+          articleId={view.params?.articleId || "new"}
+          navigate={navigate}
+          can={can}
+          user={user}
+        />
+      </div>
+    );
+  }
 
   // Full-screen editor
   if (view.name === "editor") {
