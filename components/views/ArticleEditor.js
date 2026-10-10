@@ -2512,7 +2512,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
             </div>
 
             {/* Rich Document Formatting Toolbar (1-to-1 Match with Blog Editor) */}
-            <div className="flex items-center gap-1 px-4 py-2.5 bg-muted/30 border-b border-border flex-wrap">
+            <div className="sticky top-0 z-20 flex items-center gap-1 px-4 py-2.5 bg-card/95 backdrop-blur border-b border-border flex-wrap">
               {/* Headings */}
               <button
                 type="button"
