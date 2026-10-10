@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+
 import {
   Select,
   SelectContent,
@@ -40,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import CategoryIcon from "@/components/views/CategoryIcon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -99,8 +101,26 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
   }, [search, selectedStatus, selectedCategory, selectedAuthor, sort]);
 
   // Fetch categories for filter dropdown
-  const { data: catData } = useSWR("/api/kb/categories", fetcher);
-  const categories = catData?.categories || [];
+
+const { data: catData } = useSWR("/api/kb/categories", fetcher);
+const categories = catData?.categories || [];
+
+const categoriesById = useMemo(() => {
+  const map = {};
+
+  for (const category of categories) {
+    if (category.id) {
+      map[category.id] = category;
+    }
+
+    if (category.slug) {
+      map[category.slug] = category;
+    }
+  }
+
+  return map;
+}, [categories]);
+
 
   // Fetch team / authors
   const { data: teamData } = useSWR("/api/team", fetcher);
@@ -555,15 +575,32 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                           </div>
                         </td>
 
-                        {/* 3. Category */}
-                        <td className="px-3 py-3 hidden lg:table-cell">
-                          <Badge
-                            variant="outline"
-                            className="text-[11px] font-normal gap-1 bg-muted/30"
-                          >
-                            <span>{art.categoryName || "General"}</span>
-                          </Badge>
-                        </td>
+                        
+                                                          
+                               {/* 3. Category */}
+                                <td className="px-3 py-3 hidden lg:table-cell">
+                      {(() => {
+                           const category =
+                               categoriesById[art.categoryId] ||
+                           categoriesById[art.categorySlug];
+
+                                        return (
+                                            <Badge
+                                            variant="outline"
+                                        className="inline-flex items-center gap-1.5 bg-muted/30 text-[11px] font-normal"
+                                           >
+                                              <CategoryIcon
+                                           icon={category?.icon}
+                                         className="h-3.5 w-3.5 shrink-0"
+                                                   />
+                                                        <span>
+                                                  {art.categoryName || category?.name || "General"}
+                                                     </span>
+                                                    </Badge>
+                                                          );
+                                                              })()}
+                                                  </td>
+
 
                         {/* 4. Date & Updated */}
                         <td className="px-3 py-3 hidden md:table-cell text-[13px]">

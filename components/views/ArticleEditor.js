@@ -96,6 +96,7 @@ import {
   TIME_AGO_SHORT,
 } from "@/lib/client";
 import { slugify } from "@/lib/seo";
+import CategoryIcon from "./CategoryIcon";
 
 // ==========================================
 // HELPERS
@@ -2407,12 +2408,22 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                 <Labeled label="Category" required>
                   <Select value={form.categoryId || ""} onValueChange={handleCategoryChange}>
                     <SelectTrigger className="bg-muted/30">
-                      <SelectValue placeholder="Select category" />
+                      <SelectValue placeholder="Select category">
+                        {currentCat && (
+                          <span className="flex min-w-0 items-center gap-2">
+                            <CategoryIcon icon={currentCat.icon} className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{currentCat.name}</span>
+                          </span>
+                        )}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {categories.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          {c.icon} {c.name}
+                          <span className="flex items-center gap-2">
+                            <CategoryIcon icon={c.icon} className="h-4 w-4 shrink-0" />
+                            <span>{c.name}</span>
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>

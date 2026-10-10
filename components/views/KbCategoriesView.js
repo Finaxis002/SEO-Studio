@@ -17,6 +17,12 @@ import {
   ChevronUp,
   ChevronDown,
 } from "lucide-react";
+
+
+import IconPicker from "@/components/ui/IconifyPicker";
+
+import CategoryIcon from "./CategoryIcon";
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,10 +37,8 @@ import {
 import { api, fetcher } from "@/lib/client";
 import { Pagination } from "../bits";
 
-const EMOJI_OPTIONS = ["🚀", "📄", "📦", "👥", "💰", "🚚", "🍽️", "📊", "⚙️", "🔒", "💡", "📱", "🏷️", "💳", "🛒"];
 
-export default function KbCategoriesView({ navigate, can }) {
-  const canManage = can ? can("kb.categories") || can("settings.edit") || can("blogs.edit") : true;
+export default function KbCategoriesView({ navigate }) {
   const { data, error, mutate, isLoading } = useSWR("/api/kb/categories", fetcher);
   const categories = data?.categories || [];
 
@@ -182,12 +186,10 @@ export default function KbCategoriesView({ navigate, can }) {
             <BookOpen className="w-4 h-4 mr-2" />
             All Guides
           </Button>
-          {canManage && (
-            <Button onClick={openCreateDialog} className="bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Plus className="w-4 h-4 mr-1.5" />
-              Add Category
-            </Button>
-          )}
+          <Button onClick={openCreateDialog} className="bg-primary hover:bg-primary/90 text-primary-foreground">
+            <Plus className="w-4 h-4 mr-1.5" />
+            Add Category
+          </Button>
         </div>
       </div>
 
@@ -218,7 +220,7 @@ export default function KbCategoriesView({ navigate, can }) {
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
                     <span className="text-2xl p-2 rounded-xl bg-accent/40 shrink-0 w-11 h-11 flex items-center justify-center">
-                      {cat.icon || "📄"}
+               <CategoryIcon icon={cat.icon} className="h-6 w-6" />
                     </span>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -233,28 +235,24 @@ export default function KbCategoriesView({ navigate, can }) {
                               of {categories.length}
                             </span>
                           </span>
-                          {canManage && (
-                            <>
-                              <button
-                                type="button"
-                                disabled={(cat.order ?? 1) <= 1}
-                                onClick={() => handleMoveOrder(cat, -1)}
-                                className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
-                                title="Move Category Up"
-                              >
-                                <ChevronUp className="w-3 h-3" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={(cat.order ?? 1) >= categories.length}
-                                onClick={() => handleMoveOrder(cat, 1)}
-                                className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
-                                title="Move Category Down"
-                              >
-                                <ChevronDown className="w-3 h-3" />
-                              </button>
-                            </>
-                          )}
+                          <button
+                            type="button"
+                            disabled={(cat.order ?? 1) <= 1}
+                            onClick={() => handleMoveOrder(cat, -1)}
+                            className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
+                            title="Move Category Up"
+                          >
+                            <ChevronUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={(cat.order ?? 1) >= categories.length}
+                            onClick={() => handleMoveOrder(cat, 1)}
+                            className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
+                            title="Move Category Down"
+                          >
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
                         </div>
                         {cat.articleCount > 0 ? (
                           <Badge variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
@@ -272,31 +270,29 @@ export default function KbCategoriesView({ navigate, can }) {
                     </div>
                   </div>
 
-                  {canManage && (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEditDialog(cat)}
-                        className="h-8 text-xs hover:bg-accent"
-                      >
-                        <Pencil className="w-3.5 h-3.5 mr-1" />
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setCategoryToDelete(cat);
-                          setDeleteConfirmOpen(true);
-                        }}
-                        className="h-8 text-xs text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 mr-1" />
-                        Delete
-                      </Button>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditDialog(cat)}
+                      className="h-8 text-xs hover:bg-accent"
+                    >
+                      <Pencil className="w-3.5 h-3.5 mr-1" />
+                      Edit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setCategoryToDelete(cat);
+                        setDeleteConfirmOpen(true);
+                      }}
+                      className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1" />
+                      Delete
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -327,45 +323,44 @@ export default function KbCategoriesView({ navigate, can }) {
           </DialogHeader>
 
           <form onSubmit={handleSave} className="space-y-4 pt-2">
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                Category Name *
-              </label>
-              <Input
-                placeholder="e.g. Billing & Invoicing"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-            </div>
+          <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                         Category Name *
+  </label>
 
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                Category Icon / Emoji
-              </label>
-              <div className="flex items-center gap-2">
-                <Input
-                  className="w-16 text-center text-lg font-bold"
-                  value={form.icon}
-                  onChange={(e) => setForm({ ...form, icon: e.target.value })}
-                  maxLength={4}
-                />
-                <div className="flex flex-wrap gap-1.5 flex-1">
-                  {EMOJI_OPTIONS.map((em) => (
-                    <button
-                      key={em}
-                      type="button"
-                      onClick={() => setForm({ ...form, icon: em })}
-                      className={`text-base p-1.5 rounded-lg border hover:bg-accent transition-all ${
-                        form.icon === em ? "border-primary bg-primary/10 scale-105" : "border-border"
-                      }`}
-                    >
-                      {em}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+  <Input
+    placeholder="e.g. Billing & Invoicing"
+    value={form.name}
+    onChange={(e) =>
+      setForm((previous) => ({
+        ...previous,
+        name: e.target.value,
+      }))
+    }
+    required
+  />
+</div>
+         
+      <div>
+  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+    Category Icon / Emoji
+  </label>
+
+  <IconPicker
+    value={form.icon}
+    onChange={(icon) =>
+      setForm((previous) => ({
+        ...previous,
+        icon,
+      }))
+    }
+  />
+
+  <p className="text-xs text-muted-foreground mt-2">
+    Search and select an icon or emoji.
+  </p>
+</div>
+
 
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
