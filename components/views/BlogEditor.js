@@ -303,6 +303,7 @@ export default function BlogEditor({
   const [reviewConfirmOpen, setReviewConfirmOpen] = useState(false);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
   const [sessionExpiredOpen, setSessionExpiredOpen] = useState(false);
   const [reAuthEmail, setReAuthEmail] = useState(user?.email || "");
@@ -1218,16 +1219,23 @@ export default function BlogEditor({
     }
   }
 
-  // Autosave to DB (only for drafts, not for published blogs to prevent accidental live changes)
+  // Autosave to DB (only for drafts, not for published or scheduled blogs to prevent accidental live changes)
   useEffect(() => {
-    if (!dirty || saving || form.status === "published" || !form.title.trim())
+    if (
+      !dirty ||
+      saving ||
+      autoSaving ||
+      form.status === "published" ||
+      form.status === "scheduled" ||
+      !form.title.trim()
+    )
       return;
     const t = setTimeout(() => {
       save(true);
-    }, 2500);
+    }, 8000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, dirty, id, saving]);
+  }, [form, dirty, id, saving, autoSaving]);
 
   const up = (patch) => {
     setForm((f) => {
@@ -1309,7 +1317,8 @@ export default function BlogEditor({
       if (!silent) toast.error("Please add a title first");
       return;
     }
-    setSaving(true);
+    if (silent) setAutoSaving(true);
+    else setSaving(true);
     try {
       let rawHtml = editorRef.current
         ? editorRef.current.innerHTML
@@ -1416,6 +1425,7 @@ export default function BlogEditor({
       }
     } finally {
       setSaving(false);
+      setAutoSaving(false);
     }
   }
 
@@ -2526,7 +2536,7 @@ export default function BlogEditor({
   }
 
   const statusMeta = STATUS_META[form.status] || STATUS_META.draft;
-  const savingLabel = saving
+  const savingLabel = saving || autoSaving
     ? "Saving…"
     : lastSaved
       ? "Saved " + TIME_AGO_SHORT(lastSaved)
@@ -2631,7 +2641,7 @@ export default function BlogEditor({
               )}
             </div>
             <p className="text-[11.5px] text-muted-foreground flex items-center gap-1.5">
-              {saving ? (
+              {saving || autoSaving ? (
                 <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
               ) : (
                 <CheckCircle2 className="h-3 w-3 text-emerald-500" />
