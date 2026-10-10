@@ -365,6 +365,9 @@ function newBlogDoc(body, user) {
       caption: "",
     },
     contentHtml: normalizeHtmlContent(body.contentHtml || ""),
+    faqs: Array.isArray(body.faqs)
+      ? body.faqs.filter((f) => f && (f.question?.trim() || f.answer?.trim()))
+      : [],
     wordCount: 0,
     status: "draft",
     scheduledAt: null,
@@ -2118,6 +2121,7 @@ async function handleRoute(request, { params }) {
           "excerpt",
           "featuredImage",
           "contentHtml",
+          "faqs",
           "status",
           "seo",
           "brief",
@@ -2130,6 +2134,11 @@ async function handleRoute(request, { params }) {
         fields.forEach((f) => {
           if (body[f] !== undefined) update[f] = body[f];
         });
+        if (body.faqs !== undefined) {
+          update.faqs = Array.isArray(body.faqs)
+            ? body.faqs.filter((f) => f && (f.question?.trim() || f.answer?.trim()))
+            : [];
+        }
         if (body.category !== undefined) {
           update.category = (body.category || "").trim() || "General";
         }

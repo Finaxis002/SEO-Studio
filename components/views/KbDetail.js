@@ -76,6 +76,13 @@ function getYouTubeEmbedUrl(url) {
     : null;
 }
 
+function extractYouTubeVideoId(url) {
+  if (!url) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+  const match = url.match(regExp);
+  return match && match[2] ? match[2] : null;
+}
+
 export default function KbDetail({ articleId, returnView, navigate, can }) {
   const [activeTab, setActiveTab] = useState("content");
   const [previewLang, setPreviewLang] = useState("en");
@@ -146,9 +153,33 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
     }
 
     // Strip editor-only toolbar / buttons from video wrappers for clean preview view
-    const cleanDisplayHtml = displayContentHtml
+    let cleanDisplayHtml = displayContentHtml
       .replace(/<div\s+contenteditable="false"[^>]*>[\s\S]*?kb-(?:edit|delete)-video-btn[\s\S]*?<\/div>/gi, "")
       .replace(/<button[^>]*class="kb-(?:edit|delete)-video-btn"[^>]*>[\s\S]*?<\/button>/gi, "");
+
+    // Transform any editor kb-video-wrapper into high-performance Lite YouTube Player (eliminates white-screen / scrolling disappearance & no 404s)
+    cleanDisplayHtml = cleanDisplayHtml.replace(
+      /<div\s+class=["']kb-video-wrapper["'][^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi,
+      (match, inner) => {
+        const iframeMatch = inner.match(/<iframe\s+[^>]*?src=["']([^"']+)["'][^>]*>/i);
+        const src = iframeMatch ? iframeMatch[1] : "";
+        const yId = extractYouTubeVideoId(src);
+        if (!yId) {
+          if (src) {
+            return `<div class="aspect-video w-full rounded-2xl overflow-hidden border border-border shadow-xs bg-black my-6"><iframe src="${src}" class="w-full h-full border-0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`;
+          }
+          return match;
+        }
+        return `<div class="kb-facade-video relative aspect-video w-full rounded-2xl overflow-hidden border border-border shadow-xs bg-black my-6 group cursor-pointer select-none" data-video-id="${yId}">
+          <img src="https://i.ytimg.com/vi/${yId}/hqdefault.jpg" alt="Video preview" style="width:100%!important;height:100%!important;object-fit:cover!important;max-height:none!important;border:none!important;transform:scale(1.35);" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.38]" loading="eager" />
+          <div class="absolute inset-0 bg-black/25 group-hover:bg-black/35 transition-colors flex items-center justify-center pointer-events-none">
+            <div class="w-16 h-11 sm:w-18 sm:h-12 bg-[#ff0000] text-white rounded-2xl flex items-center justify-center shadow-2xl transition-transform group-hover:scale-110">
+              <svg class="w-6 h-6 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </div>
+          </div>
+        </div>`;
+      }
+    );
 
     let headingIdx = 0;
     const headings = [];
@@ -198,6 +229,20 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
       }),
     [dynamicHeadings]
   );
+  const hasContentVideo = useMemo(
+    () =>
+      Boolean(
+        displayContentHtml &&
+          (displayContentHtml.includes("kb-video-wrapper") ||
+            displayContentHtml.includes("kb-facade-video") ||
+            /<iframe[^>]*src=["'][^"']*(?:youtube\.com|youtu\.be)[^"']*["']/i.test(displayContentHtml) ||
+            dynamicHeadings.some((h) => {
+              const t = h.text.trim().toLowerCase();
+              return t.includes("video") || t.includes("walkthrough");
+            }))
+      ),
+    [displayContentHtml, dynamicHeadings]
+  );
 
   // Scroll spy for Right-side Table of Contents
   useEffect(() => {
@@ -207,7 +252,7 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
         ...(article?.prerequisites?.length && !hasContentPrerequisites ? ["why-use-this-feature"] : []),
         ...dynamicHeadings.map((h) => h.id),
         ...(displaySteps?.length && !hasContentSteps ? ["step-by-step-guide"] : []),
-        ...(embedVideoUrl ? ["video"] : []),
+        ...(embedVideoUrl && !hasContentVideo ? ["video"] : []),
         ...(displayFaqs?.length ? ["faqs"] : []),
       ];
 
@@ -227,7 +272,22 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
 
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [displayOverview, article?.prerequisites, dynamicHeadings, displaySteps, embedVideoUrl, displayFaqs]);
+  }, [displayOverview, article?.prerequisites, dynamicHeadings, displaySteps, embedVideoUrl, hasContentVideo, displayFaqs]);
+
+  // Lite YouTube facade click listener (lazy load iframe on click)
+  useEffect(() => {
+    const handleVideoClick = (e) => {
+      const target = e.target;
+      const facade = target.closest && target.closest(".kb-facade-video");
+      if (facade && facade.dataset.videoId) {
+        const videoId = facade.dataset.videoId;
+        facade.innerHTML = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0" class="w-full h-full border-0 rounded-2xl" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+        facade.classList.remove("cursor-pointer", "group");
+      }
+    };
+    document.addEventListener("click", handleVideoClick);
+    return () => document.removeEventListener("click", handleVideoClick);
+  }, []);
 
   // Smooth scroll helper
   const scrollTo = (id) => {
@@ -840,9 +900,9 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                           [&>ol]:list-decimal [&>ol]:pl-5 [&>ol]:mb-4 [&>ol]:space-y-2 [&>ol>li]:text-muted-foreground [&>ol>li]:text-[14.5px]
                           [&>blockquote]:border-l-4 [&>blockquote]:border-[#7552da] [&>blockquote]:pl-4 [&>blockquote]:py-2 [&>blockquote]:my-4 [&>blockquote]:bg-[#7552da]/5 [&>blockquote]:rounded-r-xl [&>blockquote]:italic [&>blockquote]:text-muted-foreground
                           [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_img]:max-h-[460px] [&_img]:object-contain
-                          [&_iframe]:w-full [&_iframe]:rounded-xl
-                          [&_.kb-video-wrapper]:rounded-xl [&_.kb-video-wrapper]:overflow-hidden [&_.kb-video-wrapper]:my-6
-                          [&_.kb-video-wrapper>div:first-child]:hidden
+                          [&_.kb-facade-video_img]:!object-cover [&_.kb-facade-video_img]:!max-h-none [&_.kb-facade-video_img]:!border-0 [&_.kb-facade-video_img]:!rounded-none
+                          [&_iframe]:w-full [&_iframe]:h-full [&_iframe]:border-0
+                          [&_.kb-video-wrapper]:rounded-2xl [&_.kb-video-wrapper]:overflow-visible [&_.kb-video-wrapper]:my-6
                           [&_.kb-edit-video-btn]:hidden [&_.kb-delete-video-btn]:hidden
                           [&_a]:text-[#7552da] [&_a]:underline"
                         dangerouslySetInnerHTML={{ __html: renderedContentHtml }}
@@ -912,8 +972,8 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                     </section>
                   )}
 
-                  {/* 5. Embedded Video Walkthrough (if attached) */}
-                  {embedVideoUrl && (
+                  {/* 5. Embedded Video Walkthrough (if attached and not already in editor content) */}
+                  {embedVideoUrl && !hasContentVideo && (
                     <section id="video" className="scroll-mt-28 space-y-3 pt-4 border-t border-border/50">
                       <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                         <div className="w-6 h-6 rounded-md bg-red-100 text-red-600 flex items-center justify-center">
@@ -1043,7 +1103,7 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                     </button>
                   )}
 
-                  {embedVideoUrl && (
+                  {embedVideoUrl && !hasContentVideo && (
                     <button
                       type="button"
                       onClick={() => scrollTo("video")}

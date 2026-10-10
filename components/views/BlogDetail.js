@@ -28,6 +28,7 @@ import {
   Rocket,
   CalendarClock,
   ChevronDown,
+  HelpCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -94,6 +95,14 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewLang, setPreviewLang] = useState("en");
+  const [openFaqIndex, setOpenFaqIndex] = useState(null);
+
+  const displayFaqs = useMemo(() => {
+    if (previewLang !== "en" && b?.translations?.[previewLang]?.faqs?.length) {
+      return b.translations[previewLang].faqs;
+    }
+    return b?.faqs || [];
+  }, [b, previewLang]);
 
   const analysis = useMemo(() => (b ? analyzeSeo(b) : { checks: [] }), [b]);
   const blogActivity = useMemo(() => {
@@ -902,6 +911,45 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Frequently Asked Questions (Accordion) */}
+              {displayFaqs && displayFaqs.length > 0 && (
+                <section id="faqs" className="mt-10 pt-8 border-t border-border/60 max-w-3xl space-y-4">
+                  <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
+                    <HelpCircle className="w-5 h-5 text-[#7552da]" /> Frequently Asked Questions
+                  </h3>
+                  <div className="space-y-3">
+                    {displayFaqs.map((faq, idx) => (
+                      <div
+                        key={idx}
+                        className="border border-border/80 rounded-xl overflow-hidden bg-card transition-all"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenFaqIndex(openFaqIndex === idx ? null : idx)
+                          }
+                          className="w-full p-4 text-left flex items-center justify-between gap-4 hover:bg-muted/30 transition-colors"
+                        >
+                          <span className="font-semibold text-sm text-foreground">
+                            {faq.question}
+                          </span>
+                          <ChevronDown
+                            className={`w-4 h-4 text-muted-foreground transition-transform duration-200 shrink-0 ${
+                              openFaqIndex === idx ? "rotate-180" : ""
+                            }`}
+                          />
+                        </button>
+                        {openFaqIndex === idx && (
+                          <div className="px-4 pb-4 pt-1 text-sm text-muted-foreground leading-relaxed border-t border-border/40 bg-muted/10">
+                            {faq.answer}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
               )}
             </CardContent>
           </Card>
