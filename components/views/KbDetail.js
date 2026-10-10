@@ -54,6 +54,7 @@ import {
 } from "@/components/ui/dialog";
 import { api, fetcher, fmtDate, timeAgo, initials, getVinimayUrl } from "@/lib/client";
 import { ScheduleDialog } from "../bits";
+import CategoryIcon from "./CategoryIcon";
 
 const SUPPORTED_LANGUAGES = [
   { code: "en", label: "English", flag: "🇬🇧" },
@@ -441,7 +442,10 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                   variant="outline"
                   className="text-[11px] font-semibold bg-[#7552da]/10 text-[#7552da] border-[#7552da]/30 gap-1 px-2.5 py-0.5"
                 >
-                  <span>{currentCategory?.icon || "🚀"}</span>
+                  <CategoryIcon
+                    icon={currentCategory?.icon || "🚀"}
+                    className="h-3.5 w-3.5 shrink-0"
+                  />
                   <span>{currentCategory?.name || article.categoryName}</span>
                 </Badge>
 
