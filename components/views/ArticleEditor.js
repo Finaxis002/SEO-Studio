@@ -1119,6 +1119,10 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
   const isEdit = !!(currentId || idRef.current);
   const isNew = !isEdit;
 
+  const canPublish = can ? can("kb.publish") || can("blogs.publish") : true;
+  const canSchedule = can ? can("kb.schedule") || can("blogs.schedule") : true;
+  const canDelete = can ? can("kb.delete") || can("blogs.delete") : true;
+
   // SWR: Fetch Article Data (if editing)
   const { data: articleData, isLoading: loadingArticle } = useSWR(
     articleId !== "new" ? `/api/kb/articles/${articleId}` : null,
@@ -1137,6 +1141,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
   const allArticlesList = useMemo(() => allArticlesData?.items || [], [allArticlesData]);
 
   const [saving, setSaving] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
@@ -2029,6 +2034,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
     };
 
     if (publishNow) setPublishing(true);
+    else if (silent) setAutoSaving(true);
     else setSaving(true);
 
     try {
@@ -2098,6 +2104,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
       return false;
     } finally {
       setSaving(false);
+      setAutoSaving(false);
       setPublishing(false);
     }
   };
@@ -2131,22 +2138,25 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [hasChanges, dirty]);
 
-  // Autosave to DB (only for drafts, not for published guides to prevent accidental live changes)
+  // Autosave to DB (only for drafts, not for published or scheduled guides)
   useEffect(() => {
     if (
       !dirty ||
       saving ||
+      autoSaving ||
       publishing ||
-      form.status === "published"
+      form.status === "published" ||
+      form.status === "scheduled" ||
+      !form.title.trim()
     ) {
       return;
     }
     const t = setTimeout(() => {
       handleSave(false, {}, true); // silent = true
-    }, 2500);
+    }, 8000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, dirty, saving, publishing]);
+  }, [form, dirty, saving, autoSaving, publishing]);
 
   // Apply template to editor canvas (either replace or append)
   const handleApplyTemplate = (tmpl, mode = "replace") => {
@@ -2232,9 +2242,9 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
               {form.title || (isNew ? "Create New Knowledge Base Guide" : "Edit Guide")}
             </h1>
 
-            {(saving || lastSaved) && (
+            {(saving || autoSaving || lastSaved) && (
               <p className="text-[11.5px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                {saving ? (
+                {saving || autoSaving ? (
                   <>
                     <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                     <span>Saving…</span>
@@ -2284,87 +2294,91 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
           </Button>
 
           {/* 2. Schedule / Reschedule */}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={saving || publishing}
-            onClick={() => {
-              if (!form.categoryId) {
-                toast.error("Please select a category before scheduling");
-                return;
-              }
-              const currentHtml = editorRef.current ? editorRef.current.innerHTML : form.contentHtml;
-              const textOnly = (currentHtml || "").replace(/<[^>]*>/g, "").trim();
-              const hasMedia = currentHtml?.includes("<img") || currentHtml?.includes("<iframe");
-              if (!textOnly && !hasMedia) {
-                toast.error("Guide Document Content cannot be empty before scheduling!");
-                if (editorRef.current) {
-                  editorRef.current.focus();
-                  editorRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+          {canSchedule && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={saving || publishing}
+              onClick={() => {
+                if (!form.categoryId) {
+                  toast.error("Please select a category before scheduling");
+                  return;
                 }
-                return;
-              }
-              setScheduleOpen(true);
-            }}
-            className="h-9 text-xs font-medium hover:bg-muted"
-          >
-            <CalendarClock className="w-3.5 h-3.5 mr-1.5 text-violet-600" />
-            <span className="hidden sm:inline">
-              {form.status === "scheduled" || form.status === "published"
-                ? "Reschedule"
-                : "Schedule"}
-            </span>
-          </Button>
+                const currentHtml = editorRef.current ? editorRef.current.innerHTML : form.contentHtml;
+                const textOnly = (currentHtml || "").replace(/<[^>]*>/g, "").trim();
+                const hasMedia = currentHtml?.includes("<img") || currentHtml?.includes("<iframe");
+                if (!textOnly && !hasMedia) {
+                  toast.error("Guide Document Content cannot be empty before scheduling!");
+                  if (editorRef.current) {
+                    editorRef.current.focus();
+                    editorRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }
+                  return;
+                }
+                setScheduleOpen(true);
+              }}
+              className="h-9 text-xs font-medium hover:bg-muted"
+            >
+              <CalendarClock className="w-3.5 h-3.5 mr-1.5 text-violet-600" />
+              <span className="hidden sm:inline">
+                {form.status === "scheduled" || form.status === "published"
+                  ? "Reschedule"
+                  : "Schedule"}
+              </span>
+            </Button>
+          )}
 
           {/* 3. Publish now / Update now Button (Blurred/Disabled until changes made if published) */}
-          <Button
-            size="sm"
-            className={`h-9 text-xs font-semibold ${
-              form.status === "published" && !hasChanges
-                ? "opacity-50 cursor-not-allowed bg-muted text-muted-foreground border border-border hover:bg-muted"
-                : "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-md shadow-violet-500/25"
-            }`}
-            disabled={
-              saving || publishing || (form.status === "published" && !hasChanges)
-            }
-            onClick={() => {
-              if (form.status === "published" && !hasChanges) return;
-              if (!form.categoryId) {
-                toast.error("Please select a category before publishing!");
-                return;
+          {canPublish && (
+            <Button
+              size="sm"
+              className={`h-9 text-xs font-semibold ${
+                form.status === "published" && !hasChanges
+                  ? "opacity-50 cursor-not-allowed bg-muted text-muted-foreground border border-border hover:bg-muted"
+                  : "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-md shadow-violet-500/25"
+              }`}
+              disabled={
+                saving || publishing || (form.status === "published" && !hasChanges)
               }
-              const currentHtml = editorRef.current ? editorRef.current.innerHTML : form.contentHtml;
-              const textOnly = (currentHtml || "").replace(/<[^>]*>/g, "").trim();
-              const hasMedia = currentHtml?.includes("<img") || currentHtml?.includes("<iframe");
-              if (!textOnly && !hasMedia) {
-                toast.error(
-                  "Guide Document Content cannot be empty. Please write some content or steps before publishing!"
-                );
-                if (editorRef.current) {
-                  editorRef.current.focus();
-                  editorRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+              onClick={() => {
+                if (form.status === "published" && !hasChanges) return;
+                if (!form.categoryId) {
+                  toast.error("Please select a category before publishing!");
+                  return;
                 }
-                return;
+                const currentHtml = editorRef.current ? editorRef.current.innerHTML : form.contentHtml;
+                const textOnly = (currentHtml || "").replace(/<[^>]*>/g, "").trim();
+                const hasMedia = currentHtml?.includes("<img") || currentHtml?.includes("<iframe");
+                if (!textOnly && !hasMedia) {
+                  toast.error(
+                    "Guide Document Content cannot be empty. Please write some content or steps before publishing!"
+                  );
+                  if (editorRef.current) {
+                    editorRef.current.focus();
+                    editorRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }
+                  return;
+                }
+                handleSave(true);
+              }}
+              title={
+                form.status === "published" && !hasChanges
+                  ? "Guide is published and up to date"
+                  : form.status === "published"
+                  ? "Update published guide"
+                  : "Publish guide"
               }
-              handleSave(true);
-            }}
-            title={
-              form.status === "published" && !hasChanges
-                ? "Guide is published and up to date"
-                : form.status === "published"
-                ? "Update published guide"
-                : "Publish guide"
-            }
-          >
-            {publishing ? (
-              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-            ) : (
-              <Rocket className="w-3.5 h-3.5 mr-1.5" />
-            )}
-            <span className="hidden sm:inline">
-              {form.status === "published" ? "Update now" : "Publish now"}
-            </span>
-          </Button>
+            >
+              {publishing ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Rocket className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              <span className="hidden sm:inline">
+                {form.status === "published" ? "Update now" : "Publish now"}
+              </span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -3268,9 +3282,11 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="draft">Draft</SelectItem>
-                      <SelectItem value="scheduled">Scheduled</SelectItem>
-                      <SelectItem value="published">Published</SelectItem>
-                      <SelectItem value="archived">Archived</SelectItem>
+                      {canSchedule && <SelectItem value="scheduled">Scheduled</SelectItem>}
+                      {canPublish && <SelectItem value="published">Published</SelectItem>}
+                      {(canPublish || (can && (can("kb.archive") || can("blogs.archive")))) && (
+                        <SelectItem value="archived">Archived</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>

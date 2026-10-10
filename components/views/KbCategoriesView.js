@@ -33,7 +33,8 @@ import { Pagination } from "../bits";
 
 const EMOJI_OPTIONS = ["🚀", "📄", "📦", "👥", "💰", "🚚", "🍽️", "📊", "⚙️", "🔒", "💡", "📱", "🏷️", "💳", "🛒"];
 
-export default function KbCategoriesView({ navigate }) {
+export default function KbCategoriesView({ navigate, can }) {
+  const canManage = can ? can("kb.categories") || can("settings.edit") || can("blogs.edit") : true;
   const { data, error, mutate, isLoading } = useSWR("/api/kb/categories", fetcher);
   const categories = data?.categories || [];
 
@@ -181,10 +182,12 @@ export default function KbCategoriesView({ navigate }) {
             <BookOpen className="w-4 h-4 mr-2" />
             All Guides
           </Button>
-          <Button onClick={openCreateDialog} className="bg-primary hover:bg-primary/90 text-primary-foreground">
-            <Plus className="w-4 h-4 mr-1.5" />
-            Add Category
-          </Button>
+          {canManage && (
+            <Button onClick={openCreateDialog} className="bg-primary hover:bg-primary/90 text-primary-foreground">
+              <Plus className="w-4 h-4 mr-1.5" />
+              Add Category
+            </Button>
+          )}
         </div>
       </div>
 
@@ -230,24 +233,28 @@ export default function KbCategoriesView({ navigate }) {
                               of {categories.length}
                             </span>
                           </span>
-                          <button
-                            type="button"
-                            disabled={(cat.order ?? 1) <= 1}
-                            onClick={() => handleMoveOrder(cat, -1)}
-                            className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
-                            title="Move Category Up"
-                          >
-                            <ChevronUp className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={(cat.order ?? 1) >= categories.length}
-                            onClick={() => handleMoveOrder(cat, 1)}
-                            className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
-                            title="Move Category Down"
-                          >
-                            <ChevronDown className="w-3 h-3" />
-                          </button>
+                          {canManage && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={(cat.order ?? 1) <= 1}
+                                onClick={() => handleMoveOrder(cat, -1)}
+                                className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
+                                title="Move Category Up"
+                              >
+                                <ChevronUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={(cat.order ?? 1) >= categories.length}
+                                onClick={() => handleMoveOrder(cat, 1)}
+                                className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
+                                title="Move Category Down"
+                              >
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                            </>
+                          )}
                         </div>
                         {cat.articleCount > 0 ? (
                           <Badge variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
@@ -265,29 +272,31 @@ export default function KbCategoriesView({ navigate }) {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => openEditDialog(cat)}
-                      className="h-8 text-xs hover:bg-accent"
-                    >
-                      <Pencil className="w-3.5 h-3.5 mr-1" />
-                      Edit
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setCategoryToDelete(cat);
-                        setDeleteConfirmOpen(true);
-                      }}
-                      className="h-8 text-xs text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 mr-1" />
-                      Delete
-                    </Button>
-                  </div>
+                  {canManage && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditDialog(cat)}
+                        className="h-8 text-xs hover:bg-accent"
+                      >
+                        <Pencil className="w-3.5 h-3.5 mr-1" />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setCategoryToDelete(cat);
+                          setDeleteConfirmOpen(true);
+                        }}
+                        className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1" />
+                        Delete
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

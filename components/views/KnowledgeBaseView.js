@@ -85,7 +85,7 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
   const [selectedStatus, setSelectedStatus] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedAuthor, setSelectedAuthor] = useState("all");
-  const [sort, setSort] = useState("order");
+  const [sort, setSort] = useState("newest");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
 
@@ -176,14 +176,14 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
     selectedStatus !== "all" ||
     selectedCategory !== "all" ||
     selectedAuthor !== "all" ||
-    sort !== "order";
+    sort !== "newest";
 
   const resetFilters = () => {
     setSearch("");
     setSelectedStatus("all");
     setSelectedCategory("all");
     setSelectedAuthor("all");
-    setSort("order");
+    setSort("newest");
     setPage(1);
   };
 
@@ -282,17 +282,19 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate("kb-categories")}
-            className="text-xs font-medium"
-          >
-            <FolderOpen className="w-4 h-4 mr-1.5 text-muted-foreground" />
-            Manage Categories
-          </Button>
+          {(can("kb.categories") || can("settings.edit") || can("blogs.edit")) && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate("kb-categories")}
+              className="text-xs font-medium"
+            >
+              <FolderOpen className="w-4 h-4 mr-1.5 text-muted-foreground" />
+              Manage Categories
+            </Button>
+          )}
 
-          {can("blogs.create") && (
+          {(can("kb.create") || can("blogs.create")) && (
             <Button
               onClick={() => navigate("kb-editor", { articleId: "new" })}
               className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-lg shadow-violet-500/25 text-xs font-semibold"
@@ -398,10 +400,10 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="order">Category order</SelectItem>
                   <SelectItem value="newest">Newest first</SelectItem>
-                  <SelectItem value="oldest">Oldest first</SelectItem>
                   <SelectItem value="updated">Recently updated</SelectItem>
+                  <SelectItem value="order">Category order</SelectItem>
+                  <SelectItem value="oldest">Oldest first</SelectItem>
                   <SelectItem value="views">Most views</SelectItem>
                   <SelectItem value="alpha">Title A–Z</SelectItem>
                 </SelectContent>
@@ -516,26 +518,28 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                                 of {maxInCat}
                               </span>
                             </span>
-                            <div className="flex flex-col">
-                              <button
-                                type="button"
-                                disabled={(art.order ?? 1) <= 1}
-                                onClick={() => handleMoveOrder(art, -1)}
-                                className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
-                                title="Move Guide Up"
-                              >
-                                <ChevronUp className="w-2.5 h-2.5" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={(art.order ?? 1) >= maxInCat}
-                                onClick={() => handleMoveOrder(art, 1)}
-                                className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
-                                title="Move Guide Down"
-                              >
-                                <ChevronDown className="w-2.5 h-2.5" />
-                              </button>
-                            </div>
+                            {(can("kb.edit") || can("blogs.edit")) && (
+                              <div className="flex flex-col">
+                                <button
+                                  type="button"
+                                  disabled={(art.order ?? 1) <= 1}
+                                  onClick={() => handleMoveOrder(art, -1)}
+                                  className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
+                                  title="Move Guide Up"
+                                >
+                                  <ChevronUp className="w-2.5 h-2.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={(art.order ?? 1) >= maxInCat}
+                                  onClick={() => handleMoveOrder(art, 1)}
+                                  className="p-0.5 hover:bg-background rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-25 disabled:pointer-events-none"
+                                  title="Move Guide Down"
+                                >
+                                  <ChevronDown className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </td>
 
@@ -677,7 +681,7 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                                 <Eye className="w-4 h-4 mr-2" /> View in Studio
                               </DropdownMenuItem>
 
-                              {can("blogs.edit") && (
+                              {(can("kb.edit") || can("blogs.edit")) && (
                                 <DropdownMenuItem
                                   onClick={() => navigate("kb-editor", { articleId: art.id })}
                                   className="cursor-pointer"
@@ -716,7 +720,7 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                               {/* 1. DRAFT */}
                               {art.status === "draft" && (
                                 <>
-                                  {can("blogs.publish") && (
+                                  {(can("kb.publish") || can("blogs.publish")) && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "published")}
                                       className="cursor-pointer"
@@ -725,7 +729,7 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                                       Publish Live Now
                                     </DropdownMenuItem>
                                   )}
-                                  {can("blogs.schedule") && (
+                                  {(can("kb.schedule") || can("blogs.schedule")) && (
                                     <DropdownMenuItem
                                       onClick={() => setSchedulingGuide(art)}
                                       className="cursor-pointer"
@@ -734,20 +738,22 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                                       Schedule Guide
                                     </DropdownMenuItem>
                                   )}
-                                  <DropdownMenuItem
-                                    onClick={() => handleTransition(art, "archived")}
-                                    className="cursor-pointer text-muted-foreground hover:text-foreground"
-                                  >
-                                    <Archive className="w-4 h-4 mr-2 text-amber-600" />
-                                    Archive Guide
-                                  </DropdownMenuItem>
+                                  {(can("kb.archive") || can("blogs.archive")) && (
+                                    <DropdownMenuItem
+                                      onClick={() => handleTransition(art, "archived")}
+                                      className="cursor-pointer text-muted-foreground hover:text-foreground"
+                                    >
+                                      <Archive className="w-4 h-4 mr-2 text-amber-600" />
+                                      Archive Guide
+                                    </DropdownMenuItem>
+                                  )}
                                 </>
                               )}
 
                               {/* 2. SCHEDULED */}
                               {art.status === "scheduled" && (
                                 <>
-                                  {can("blogs.publish") && (
+                                  {(can("kb.publish") || can("blogs.publish")) && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "published")}
                                       className="cursor-pointer"
@@ -756,7 +762,7 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                                       Publish Live Now
                                     </DropdownMenuItem>
                                   )}
-                                  {can("blogs.schedule") && (
+                                  {(can("kb.schedule") || can("blogs.schedule")) && (
                                     <DropdownMenuItem
                                       onClick={() => setSchedulingGuide(art)}
                                       className="cursor-pointer"
@@ -765,27 +771,31 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                                       Reschedule Guide
                                     </DropdownMenuItem>
                                   )}
-                                  <DropdownMenuItem
-                                    onClick={() => handleTransition(art, "draft", { scheduledAt: null })}
-                                    className="cursor-pointer"
-                                  >
-                                    <RotateCcw className="w-4 h-4 mr-2 text-amber-600" />
-                                    Cancel Schedule (To Draft)
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => handleTransition(art, "archived")}
-                                    className="cursor-pointer text-muted-foreground hover:text-foreground"
-                                  >
-                                    <Archive className="w-4 h-4 mr-2 text-amber-600" />
-                                    Archive Guide
-                                  </DropdownMenuItem>
+                                  {(can("kb.schedule") || can("blogs.schedule")) && (
+                                    <DropdownMenuItem
+                                      onClick={() => handleTransition(art, "draft", { scheduledAt: null })}
+                                      className="cursor-pointer"
+                                    >
+                                      <RotateCcw className="w-4 h-4 mr-2 text-amber-600" />
+                                      Cancel Schedule (To Draft)
+                                    </DropdownMenuItem>
+                                  )}
+                                  {(can("kb.archive") || can("blogs.archive")) && (
+                                    <DropdownMenuItem
+                                      onClick={() => handleTransition(art, "archived")}
+                                      className="cursor-pointer text-muted-foreground hover:text-foreground"
+                                    >
+                                      <Archive className="w-4 h-4 mr-2 text-amber-600" />
+                                      Archive Guide
+                                    </DropdownMenuItem>
+                                  )}
                                 </>
                               )}
 
                               {/* 3. PUBLISHED (No Schedule Guide!) */}
                               {art.status === "published" && (
                                 <>
-                                  {can("blogs.publish") && (
+                                  {(can("kb.publish") || can("blogs.publish")) && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "draft")}
                                       className="cursor-pointer"
@@ -794,27 +804,31 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                                       Unpublish to Draft
                                     </DropdownMenuItem>
                                   )}
-                                  <DropdownMenuItem
-                                    onClick={() => handleTransition(art, "archived")}
-                                    className="cursor-pointer text-muted-foreground hover:text-foreground"
-                                  >
-                                    <Archive className="w-4 h-4 mr-2 text-amber-600" />
-                                    Archive Guide
-                                  </DropdownMenuItem>
+                                  {(can("kb.archive") || can("blogs.archive")) && (
+                                    <DropdownMenuItem
+                                      onClick={() => handleTransition(art, "archived")}
+                                      className="cursor-pointer text-muted-foreground hover:text-foreground"
+                                    >
+                                      <Archive className="w-4 h-4 mr-2 text-amber-600" />
+                                      Archive Guide
+                                    </DropdownMenuItem>
+                                  )}
                                 </>
                               )}
 
                               {/* 4. ARCHIVED */}
                               {art.status === "archived" && (
                                 <>
-                                  <DropdownMenuItem
-                                    onClick={() => handleTransition(art, "draft")}
-                                    className="cursor-pointer"
-                                  >
-                                    <RotateCcw className="w-4 h-4 mr-2 text-sky-600" />
-                                    Restore to Draft
-                                  </DropdownMenuItem>
-                                  {can("blogs.publish") && (
+                                  {(can("kb.edit") || can("blogs.edit")) && (
+                                    <DropdownMenuItem
+                                      onClick={() => handleTransition(art, "draft")}
+                                      className="cursor-pointer"
+                                    >
+                                      <RotateCcw className="w-4 h-4 mr-2 text-sky-600" />
+                                      Restore to Draft
+                                    </DropdownMenuItem>
+                                  )}
+                                  {(can("kb.publish") || can("blogs.publish")) && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "published")}
                                       className="cursor-pointer"
@@ -826,10 +840,8 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
                                 </>
                               )}
 
-                              <DropdownMenuSeparator />
-
                               {/* Delete Guide */}
-                              {can("blogs.delete") && (
+                              {(can("kb.delete") || can("blogs.delete")) && (
                                 <DropdownMenuItem
                                   className="text-rose-600 dark:text-rose-400 focus:text-rose-600 dark:focus:text-rose-400 focus:bg-rose-500/10 cursor-pointer"
                                   onClick={() => {

@@ -130,13 +130,13 @@ export const NAV = [
         key: "kb",
         label: "All Guides",
         icon: BookOpen,
-        perm: "blogs.view",
+        perm: ["kb.view", "blogs.view"],
       },
       {
         key: "create-kb",
         label: "Create Guide",
         icon: PlusCircle,
-        perm: "blogs.create",
+        perm: ["kb.create", "blogs.create"],
         view: {
           name: "kb-editor",
           articleId: "new",
@@ -146,7 +146,7 @@ export const NAV = [
         key: "kb-categories",
         label: "KB Categories",
         icon: FolderOpen,
-        perm: "blogs.view",
+        perm: ["kb.categories", "kb.view", "blogs.view"],
       },
     ],
   },
@@ -410,9 +410,12 @@ export default function Sidebar({
       <TooltipProvider delayDuration={200}>
         <nav className="flex-1 overflow-y-auto py-3 px-2.5 space-y-4">
           {NAV.map((g) => {
-            const items = g.items.filter(
-              (it) => !it.perm || (can && can(it.perm)),
-            );
+            const items = g.items.filter((it) => {
+              if (!it.perm) return true;
+              if (!can) return false;
+              if (Array.isArray(it.perm)) return it.perm.some((p) => can(p));
+              return can(it.perm);
+            });
 
             if (!items.length) {
               return null;

@@ -470,8 +470,16 @@ export default function App() {
         );
       }
       case "kb":
+        if (!can("kb.view") && !can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view Knowledge Base guides.",
+          );
         return <KnowledgeBaseView navigate={navigate} can={can} />;
       case "kb-detail":
+        if (!can("kb.view") && !can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view this guide.",
+          );
         return (
           <KbDetail
             articleId={p.articleId || p.id}
@@ -481,6 +489,10 @@ export default function App() {
           />
         );
       case "kb-categories":
+        if (!can("kb.categories") && !can("kb.view") && !can("blogs.view"))
+          return accessDenied(
+            "Your role does not have permission to view or manage categories.",
+          );
         return <KbCategoriesView navigate={navigate} can={can} />;
       default:
         return <Dashboard user={user} navigate={navigate} can={can} />;
@@ -489,6 +501,23 @@ export default function App() {
 
   // Full-screen Knowledge Base editor
   if (view.name === "kb-editor") {
+    const isNew = !view.params?.articleId || view.params?.articleId === "new";
+    if (isNew && !can("kb.create") && !can("blogs.create")) {
+      return accessDenied(
+        "Your role does not have permission to create Knowledge Base guides.",
+      );
+    }
+    if (
+      !isNew &&
+      !can("kb.edit") &&
+      !can("kb.view") &&
+      !can("blogs.edit") &&
+      !can("blogs.view")
+    ) {
+      return accessDenied(
+        "Your role does not have permission to edit or view this guide.",
+      );
+    }
     return (
       <div className="min-h-screen bg-background p-4 lg:p-6">
         <ArticleEditor
