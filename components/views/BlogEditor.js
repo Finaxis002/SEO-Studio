@@ -76,7 +76,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import mammoth from "mammoth";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -276,6 +276,7 @@ const emptyForm = () => ({
     externalRefs: "",
   },
   savedSuggestions: [],
+  faqs: [],
   status: "draft",
   scheduledAt: null,
   publishedAt: null,
@@ -536,6 +537,7 @@ export default function BlogEditor({
         seo: Object.assign(emptyForm().seo, blogDoc.seo || {}),
         brief: Object.assign(emptyForm().brief, blogDoc.brief || {}),
         savedSuggestions: blogDoc.savedSuggestions || [],
+        faqs: blogDoc.faqs || [],
         status: blogDoc.status,
         scheduledAt: blogDoc.scheduledAt,
         publishedAt: blogDoc.publishedAt,
@@ -1342,6 +1344,7 @@ export default function BlogEditor({
         tags: form.tags,
         featuredImage: form.featuredImage,
         contentHtml: sanitizedHtml,
+        faqs: (form.faqs || []).filter((f) => f && (f.question?.trim() || f.answer?.trim())),
         seo: {
           ...form.seo,
           score: analysis.score,
@@ -2076,6 +2079,31 @@ export default function BlogEditor({
       toast.success("Image uploaded successfully");
     }
   }
+
+  const handleAddFaq = () => {
+    setDirty(true);
+    setForm((prev) => ({
+      ...prev,
+      faqs: [...(prev.faqs || []), { question: "", answer: "" }],
+    }));
+  };
+
+  const handleRemoveFaq = (idx) => {
+    setDirty(true);
+    setForm((prev) => ({
+      ...prev,
+      faqs: (prev.faqs || []).filter((_, i) => i !== idx),
+    }));
+  };
+
+  const handleFaqChange = (idx, field, val) => {
+    setDirty(true);
+    setForm((prev) => {
+      const updated = [...(prev.faqs || [])];
+      updated[idx] = { ...updated[idx], [field]: val };
+      return { ...prev, faqs: updated };
+    });
+  };
 
   async function optimizeFeatured(mode) {
     const url = form.featuredImage?.url;
@@ -3874,6 +3902,81 @@ export default function BlogEditor({
                   );
                 }}
               />
+            </CardContent>
+          </Card>
+
+          {/* Frequently Asked Questions (FAQs) Builder Card */}
+          <Card className="border-border/70 shadow-xs overflow-hidden mt-6">
+            <CardHeader className="p-6 pb-4 border-b border-border/50 flex flex-row items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-base font-bold text-foreground">
+                  Frequently Asked Questions (FAQs)
+                </CardTitle>
+                <CardDescription className="text-xs text-muted-foreground mt-1">
+                  Add common questions &amp; answers. These render as an interactive accordion on the blog page and generate Google FAQPage Schema for rich search results.
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAddFaq}
+                className="text-xs font-semibold rounded-xl border-dashed border-border hover:border-foreground text-foreground shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" /> Add FAQ
+              </Button>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              {(form.faqs || []).map((faq, idx) => (
+                <div
+                  key={idx}
+                  className="p-4 rounded-xl border border-border/70 bg-muted/20 space-y-3 relative group"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      FAQ #{idx + 1}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveFaq(idx)}
+                      className="text-muted-foreground hover:text-red-600 h-7 w-7 p-0 rounded-lg"
+                      title="Delete FAQ"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground/80 mb-1.5 block">
+                      Question
+                    </label>
+                    <Input
+                      value={faq.question || ""}
+                      onChange={(e) => handleFaqChange(idx, "question", e.target.value)}
+                      placeholder="e.g. What are the key compliance requirements for GST registration?"
+                      className="rounded-xl border-border bg-background"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground/80 mb-1.5 block">
+                      Answer
+                    </label>
+                    <Textarea
+                      value={faq.answer || ""}
+                      onChange={(e) => handleFaqChange(idx, "answer", e.target.value)}
+                      rows={2}
+                      placeholder="Provide a clear, helpful answer..."
+                      className="rounded-xl border-border bg-background"
+                    />
+                  </div>
+                </div>
+              ))}
+              {(!form.faqs || form.faqs.length === 0) && (
+                <div className="text-center py-6 text-xs text-muted-foreground border border-dashed border-border rounded-xl">
+                  No FAQs added yet. Click &quot;Add FAQ&quot; to add questions for your readers and Google Rich Snippets.
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
