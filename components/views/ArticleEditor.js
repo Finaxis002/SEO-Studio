@@ -42,6 +42,7 @@ import {
   Check,
   X,
   Plus,
+  Globe,
   Search,
   Video,
   FileText,
@@ -56,9 +57,15 @@ import {
   Copy,
   MoreHorizontal,
   CalendarClock,
+  ChevronDown,
 } from "lucide-react";
 import { ScheduleDialog, StatusBadge, Labeled } from "../bits";
 
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -91,9 +98,11 @@ import {
   api,
   fetcher,
   getImageThumbnailUrl,
+  timeAgo,
   TIME_AGO_SHORT,
 } from "@/lib/client";
-import { slugify } from "@/lib/seo";
+import { slugify, normalizeLinkHref } from "@/lib/seo";
+import { Checkbox } from "@/components/ui/checkbox";
 import CategoryIcon from "./CategoryIcon";
 import FaqEditorCard from "../ui/FaqEditorCard";
 
@@ -292,29 +301,55 @@ function ImageDialog({ state, onClose, onUpload, onInsert, onApply }) {
           )}
 
           {mode === "upload" && (
-            <label className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-violet-200 dark:border-violet-900 bg-violet-50/40 dark:bg-violet-950/20 py-8 cursor-pointer hover:border-violet-400 transition-colors">
-              <Upload className="h-6 w-6 text-violet-400" />
-              <span className="text-sm font-medium">Click to upload</span>
-              <input
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  setBusy(true);
-                  const c = await onUpload([f]);
-                  setBusy(false);
-                  if (c) {
-                    setUrl(c.url);
-                    setAlt(c.name?.replace(/\.[^.]+$/, "") || "");
-                    setMode("url");
-                    toast.success("Image uploaded & auto-optimized to WebP");
-                  }
-                }}
-              />
-              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            </label>
+            <div className="space-y-3">
+              <label className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-violet-200 dark:border-violet-900 bg-violet-50/40 dark:bg-violet-950/20 py-6 cursor-pointer hover:border-violet-400 transition-colors">
+                {busy ? (
+                  <div className="flex flex-col items-center gap-2 py-4">
+                    <Loader2 className="h-6 w-6 animate-spin text-violet-500" />
+                    <span className="text-xs text-muted-foreground font-medium">
+                      Uploading to Media Library &amp; Cloudinary...
+                    </span>
+                  </div>
+                ) : url ? (
+                  <div className="flex flex-col items-center gap-2 p-2">
+                    <img
+                      src={url}
+                      alt={alt || "Uploaded preview"}
+                      className="h-24 max-w-[220px] object-cover rounded-lg border border-border shadow-xs"
+                    />
+                    <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Image ready! Click &quot;Insert Image&quot; below
+                    </span>
+                    <span className="text-[11px] text-muted-foreground hover:underline">
+                      Click to choose a different image
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="h-6 w-6 text-violet-400" />
+                    <span className="text-sm font-medium">Click to upload</span>
+                    <span className="text-xs text-muted-foreground">PNG, JPG, WebP, GIF</span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    setBusy(true);
+                    const c = await onUpload([f]);
+                    setBusy(false);
+                    if (c && c.url) {
+                      setUrl(c.url);
+                      if (!alt) setAlt(c.name?.replace(/\.[^.]+$/, "") || "");
+                      toast.success("Image uploaded & ready to insert!");
+                    }
+                  }}
+                />
+              </label>
+            </div>
           )}
 
           {mode === "library" && (
@@ -1175,10 +1210,27 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
   const [textFormatOpen, setTextFormatOpen] = useState(false);
   const [textFormatPosition, setTextFormatPosition] = useState({ top: 0, left: 0 });
 
+  // Floating Link Bar on Click (1-to-1 BlogEditor Match)
+  const [linkBar, setLinkBar] = useState(null); // { el, href, text, status, targetUrl }
+  const [linkBarPos, setLinkBarPos] = useState({ top: 0, left: 0 });
+
+  // Advanced Link Dialog State (1-to-1 BlogEditor Match)
+  const [linkDialog, setLinkDialog] = useState(null); // { url, text, newTab, editAnchor }
+  const [linkTab, setLinkTab] = useState("kb");
+  const [kbLinkSearch, setKbLinkSearch] = useState("");
+
+  // LocalStorage Draft Recovery Banner State
+  const [localDraftNotice, setLocalDraftNotice] = useState(null);
+
   const saveSel = () => {
     try {
       const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0) {
+      if (
+        sel &&
+        sel.rangeCount > 0 &&
+        editorRef.current &&
+        editorRef.current.contains(sel.getRangeAt(0).commonAncestorContainer)
+      ) {
         savedRange.current = sel.getRangeAt(0).cloneRange();
       }
     } catch (e) {}
@@ -1186,12 +1238,41 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
 
   const restoreSel = () => {
     try {
-      if (savedRange.current) {
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(savedRange.current);
+      if (savedRange.current && editorRef.current) {
+        if (editorRef.current.contains(savedRange.current.commonAncestorContainer)) {
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(savedRange.current);
+          return true;
+        }
       }
     } catch (e) {}
+    return false;
+  };
+
+  const openLinkDialog = (initial = {}) => {
+    saveSel();
+    const url = initial.url || "";
+    let tab = "kb";
+    if (
+      url.includes("vinimay.sharda.co.in") ||
+      (url.startsWith("/") && !url.startsWith("/knowledge-base") && !url.startsWith("/help-center"))
+    ) {
+      tab = "vinimay";
+    } else if (
+      url.startsWith("http://") ||
+      (url.startsWith("https://") && !url.includes("vinimay"))
+    ) {
+      tab = "external";
+    }
+    setLinkTab(tab);
+    setKbLinkSearch("");
+    setLinkDialog({
+      url,
+      text: initial.text || "",
+      newTab: initial.newTab !== undefined ? initial.newTab : true,
+      editAnchor: initial.editAnchor || null,
+    });
   };
 
   const getCurrentFontSize = () => {
@@ -1454,6 +1535,76 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
     return currentSnapshot !== initialSnapshotRef.current;
   }, [isNew, dirty, form]);
 
+  // Check for unsaved local draft in browser localStorage
+  useEffect(() => {
+    if (loadingArticle) return;
+    const draftKey = "ss_kb_draft_" + (articleId || "new");
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.savedAt) {
+          if (!isNew && lastSaved) {
+            const serverTime = new Date(lastSaved).getTime();
+            // If local draft is at least 3 seconds newer than server lastSaved
+            if (parsed.savedAt > serverTime + 3000) {
+              setLocalDraftNotice(parsed);
+            }
+          } else if (
+            isNew &&
+            (parsed.form?.title ||
+              (parsed.contentHtml && parsed.contentHtml.length > 20))
+          ) {
+            setLocalDraftNotice(parsed);
+          }
+        }
+      }
+    } catch (err) {}
+  }, [articleId, isNew, lastSaved, loadingArticle]);
+
+  const restoreLocalDraft = () => {
+    if (!localDraftNotice) return;
+    if (localDraftNotice.form) {
+      setForm(localDraftNotice.form);
+    }
+    if (localDraftNotice.contentHtml && editorRef.current) {
+      editorRef.current.innerHTML = localDraftNotice.contentHtml;
+    }
+    setDirty(true);
+    toast.success("Unsaved local draft restored! 🎉");
+    setLocalDraftNotice(null);
+  };
+
+  const discardLocalDraft = () => {
+    try {
+      localStorage.removeItem("ss_kb_draft_" + (articleId || "new"));
+    } catch (err) {}
+    setLocalDraftNotice(null);
+    toast.info("Local draft discarded.");
+  };
+
+  // LocalStorage debounced autosave (1.5s)
+  useEffect(() => {
+    if (loadingArticle) return;
+    if (!dirty && !hasChanges) return;
+    const timer = setTimeout(() => {
+      try {
+        const draftKey = "ss_kb_draft_" + (articleId || "new");
+        const currentHtml = editorRef.current
+          ? editorRef.current.innerHTML
+          : form.contentHtml;
+        const draftPayload = {
+          form,
+          contentHtml: currentHtml,
+          savedAt: Date.now(),
+          id: articleId || null,
+        };
+        localStorage.setItem(draftKey, JSON.stringify(draftPayload));
+      } catch (err) {}
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [form, dirty, hasChanges, articleId, loadingArticle]);
+
   // Duplicate slug detection (live, exact match with BlogEditor)
   const duplicateArticle = useMemo(() => {
     if (!form.slug) return null;
@@ -1490,6 +1641,16 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
       ...(isNew ? { order: nextOrder } : {}),
     }));
   };
+
+  // Category search states & filter
+  const [catSearch, setCatSearch] = useState("");
+  const [catOpen, setCatOpen] = useState(false);
+
+  const filteredCategories = useMemo(() => {
+    const q = catSearch.trim().toLowerCase();
+    if (!q) return categories;
+    return categories.filter((c) => (c.name || "").toLowerCase().includes(q));
+  }, [categories, catSearch]);
 
   // Available Author List from Team API (pure active team members, exactly matching BlogEditor)
   const authorOptions = useMemo(() => {
@@ -1535,19 +1696,90 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
     }
   };
 
+  // Insert arbitrary HTML at the exact cursor location (restoring selection with DOM fallback)
+  const insertHTML = (html) => {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+
+    const sel = window.getSelection();
+    let range = null;
+
+    if (savedRange.current) {
+      try {
+        if (el.contains(savedRange.current.commonAncestorContainer)) {
+          range = savedRange.current.cloneRange();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      } catch (e) {}
+      savedRange.current = null;
+    }
+
+    if (!range && sel && sel.rangeCount > 0) {
+      try {
+        const cur = sel.getRangeAt(0);
+        if (el.contains(cur.commonAncestorContainer)) {
+          range = cur;
+        }
+      } catch (e) {}
+    }
+
+    let success = false;
+    try {
+      success = document.execCommand("insertHTML", false, html);
+    } catch (e) {
+      success = false;
+    }
+
+    if (!success) {
+      if (!range) {
+        range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+      }
+      try {
+        range.deleteContents();
+        const div = document.createElement("div");
+        div.innerHTML = html;
+        const frag = document.createDocumentFragment();
+        let node;
+        let lastNode;
+        while ((node = div.firstChild)) {
+          lastNode = frag.appendChild(node);
+        }
+        range.insertNode(frag);
+        if (lastNode) {
+          const nextRange = document.createRange();
+          nextRange.setStartAfter(lastNode);
+          nextRange.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(nextRange);
+        }
+      } catch (err) {
+        el.innerHTML = (el.innerHTML || "") + html;
+      }
+    }
+
+    setDirty(true);
+    if (editorRef.current) {
+      setForm((prev) => ({
+        ...prev,
+        contentHtml: editorRef.current.innerHTML,
+      }));
+    }
+  };
+
   // Insert image from ImageDialog into editor
   const handleInsertImage = (opts) => {
-    if (editorRef.current) {
-      editorRef.current.focus();
-    }
     const html = renderFigure(
       opts.url,
-      opts.alt,
-      opts.caption,
-      opts.width,
-      opts.align
+      opts.alt || "Guide screenshot",
+      opts.caption || "",
+      opts.width || "100",
+      opts.align || "center"
     );
-    execCmd("insertHTML", html);
+    insertHTML(html);
     setImgDialog(null);
     toast.success("Image inserted into guide!");
   };
@@ -1555,7 +1787,17 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
   // WYSIWYG Document Editor Commands
   const execCmd = (cmd, val = null) => {
     if (typeof document !== "undefined") {
+      if (cmd === "insertHTML") {
+        insertHTML(val);
+        return;
+      }
+      const el = editorRef.current;
+      if (el) {
+        el.focus();
+        restoreSel();
+      }
       document.execCommand(cmd, false, val);
+      savedRange.current = null;
       if (editorRef.current) {
         const html = editorRef.current.innerHTML;
         setForm((prev) => ({ ...prev, contentHtml: html }));
@@ -1563,10 +1805,76 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
     }
   };
 
-  // Insert link
+  // Open Advanced Link Dialog (Matches BlogEditor 1-to-1)
   const handleInsertLink = () => {
-    const url = prompt("Enter link URL (e.g. https://vinimay.in or /knowledge-base):");
-    if (url) execCmd("createLink", url);
+    saveSel();
+    const sel = window.getSelection();
+    const selectedText = sel ? sel.toString().trim() : "";
+    setTextFormatOpen(false);
+    openLinkDialog({
+      url: "",
+      text: selectedText,
+      newTab: true,
+    });
+  };
+
+  // Apply Link from LinkDialog (Insert new or update existing anchor)
+  const handleApplyLink = () => {
+    if (!linkDialog?.url) {
+      toast.error("Please enter or select a URL");
+      return;
+    }
+    const targetUrl = normalizeLinkHref(linkDialog.url.trim());
+    if (!targetUrl) {
+      toast.error("Please enter a valid URL");
+      return;
+    }
+
+    // 1. If editing an existing anchor node directly
+    if (linkDialog.editAnchor) {
+      linkDialog.editAnchor.setAttribute("href", targetUrl);
+      if (linkDialog.text) {
+        linkDialog.editAnchor.textContent = linkDialog.text;
+      }
+      if (linkDialog.newTab) {
+        linkDialog.editAnchor.setAttribute("target", "_blank");
+        linkDialog.editAnchor.setAttribute("rel", "noopener");
+      } else {
+        linkDialog.editAnchor.removeAttribute("target");
+        linkDialog.editAnchor.removeAttribute("rel");
+      }
+      setLinkDialog(null);
+      setLinkBar(null);
+      setDirty(true);
+      if (editorRef.current) {
+        setForm((prev) => ({ ...prev, contentHtml: editorRef.current.innerHTML }));
+      }
+      toast.success("Link updated successfully!");
+      return;
+    }
+
+    // 2. If inserting a new link
+    execCmd("createLink", targetUrl);
+    setLinkDialog(null);
+    setTimeout(() => {
+      const sel = window.getSelection();
+      const node = sel && sel.focusNode;
+      if (node) {
+        const a = node.parentElement && node.parentElement.closest("a");
+        if (a) {
+          if (linkDialog.newTab) {
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener");
+          }
+          if (linkDialog.text) a.textContent = linkDialog.text;
+        }
+      }
+      setDirty(true);
+      if (editorRef.current) {
+        setForm((prev) => ({ ...prev, contentHtml: editorRef.current.innerHTML }));
+      }
+    }, 40);
+    toast.success("Link inserted!");
   };
 
   // Insert YouTube Video Embed directly into content
@@ -1648,7 +1956,59 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
       return;
     }
 
-    // 1. Image clicked
+    // 1. Handle clicking links inside the editor (Floating Link Action Bar)
+    const a = e.target.closest && e.target.closest("a");
+    if (a && editorRef.current && editorRef.current.contains(a)) {
+      e.preventDefault();
+      const href = a.getAttribute("href") || "";
+      const isInternal =
+        href.startsWith("/") ||
+        href.startsWith("#") ||
+        href.includes("vinimay.in") ||
+        href.includes("vinimay.sharda.co.in");
+      const isKb =
+        /^\/(?:knowledge-base|help-center)\//i.test(href) ||
+        /vinimay\.(?:in|sharda\.co\.in)\/(?:knowledge-base|help-center)\//i.test(href);
+
+      let status = "external";
+      if (isInternal) {
+        status = isKb ? "kb_article" : "vinimay_page";
+      }
+
+      const rect = a.getBoundingClientRect();
+      const parentRect = editorRef.current.parentElement.getBoundingClientRect();
+
+      setLinkBarPos({
+        top: Math.max(
+          8,
+          rect.top - parentRect.top + editorRef.current.scrollTop - 46
+        ),
+        left: Math.max(
+          12,
+          Math.min(
+            rect.left - parentRect.left + editorRef.current.scrollLeft,
+            parentRect.width - 340
+          )
+        ),
+      });
+
+      setLinkBar({
+        el: a,
+        href,
+        text: a.textContent || "",
+        status,
+        targetUrl: href.startsWith("http")
+          ? href
+          : `https://vinimay.in${href.startsWith("/") ? "" : "/"}${href}`,
+      });
+      setImgBar(null);
+      setVideoBar(null);
+      return;
+    }
+
+    setLinkBar(null);
+
+    // 2. Image clicked
     const img = e.target.closest && e.target.closest("img");
     if (img && editorRef.current && editorRef.current.contains(img)) {
       editorRef.current.querySelectorAll(".ss-selected-media").forEach((el) => {
@@ -1836,11 +2196,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
         )
         .join("") +
       "</tbody></table><p></p>";
-    if (editorRef.current) {
-      editorRef.current.focus();
-      document.execCommand("insertHTML", false, tableHtml);
-      setForm((prev) => ({ ...prev, contentHtml: editorRef.current.innerHTML }));
-    }
+    insertHTML(tableHtml);
   };
 
   // Keyboard Handler for Enter, Shift+Enter, Heading Exit, and Shortcuts
@@ -1896,8 +2252,36 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
     }
   };
 
-  // Paste Handler: Automatically preserves line breaks from copied text
-  const handleEditorPaste = (e) => {
+  // Paste Handler: Automatically preserves line breaks from copied text & uploads pasted screenshots
+  const handleEditorPaste = async (e) => {
+    // Check if pasted items contain an image file (e.g. screenshot Ctrl+V)
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (const item of items) {
+        if (item.type && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            saveSel();
+            toast.info("Uploading pasted screenshot...");
+            const created = await uploadFiles([file]);
+            if (created && created[0]) {
+              const html = renderFigure(
+                created[0].url,
+                created[0].alt || "Pasted screenshot",
+                "",
+                "100",
+                "center"
+              );
+              insertHTML(html);
+              toast.success("Screenshot inserted!");
+            }
+            return;
+          }
+        }
+      }
+    }
+
     const text = e.clipboardData?.getData("text/plain");
     const html = e.clipboardData?.getData("text/html");
 
@@ -1908,10 +2292,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
         .split(/\r?\n\r?\n/)
         .map((para) => `<p>${para.replace(/\r?\n/g, "<br>")}</p>`)
         .join("");
-      document.execCommand("insertHTML", false, paragraphs);
-      if (editorRef.current) {
-        setForm((prev) => ({ ...prev, contentHtml: editorRef.current.innerHTML }));
-      }
+      insertHTML(paragraphs);
     }
   };
 
@@ -2071,6 +2452,13 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
         status: payload.status,
         scheduledAt: payload.scheduledAt,
       }));
+
+      // Clean up local draft backup since now safely saved to backend
+      try {
+        localStorage.removeItem("ss_kb_draft_" + (articleId || "new"));
+        if (savedArticleId) localStorage.removeItem("ss_kb_draft_" + savedArticleId);
+      } catch (err) {}
+
       window.dispatchEvent(new Event("ss-refresh"));
       return savedArticleId;
     } catch (err) {
@@ -2356,6 +2744,35 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
         </div>
       </div>
 
+      {/* Local Draft Restored Banner */}
+      {localDraftNotice && (
+        <div className="bg-amber-50/90 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900 px-4 lg:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-[13px] text-amber-900 dark:text-amber-200 mb-6 rounded-lg">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              <strong>Unsaved Local Draft Found:</strong> We detected unsaved changes from {timeAgo(localDraftNotice.savedAt)}. Would you like to restore your work?
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+              onClick={discardLocalDraft}
+            >
+              Discard Draft
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-xs"
+              onClick={restoreLocalDraft}
+            >
+              Restore Draft
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* ==================================================== */}
       {/* MAIN 2-COLUMN SPLIT: Content Body (8) & Settings (4) */}
       {/* ==================================================== */}
@@ -2379,28 +2796,96 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
               {/* Category and Author Row (Exact BlogEditor UI match) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                 <Labeled label="Category" required>
-                  <Select value={form.categoryId || ""} onValueChange={handleCategoryChange}>
-                    <SelectTrigger className="bg-muted/30">
-                      <SelectValue placeholder="Select category">
-                        {currentCat && (
-                          <span className="flex min-w-0 items-center gap-2">
-                            <CategoryIcon icon={currentCat.icon} className="h-4 w-4 shrink-0" />
-                            <span className="truncate">{currentCat.name}</span>
-                          </span>
+                  <Popover
+                    open={catOpen}
+                    onOpenChange={(o) => {
+                      setCatOpen(o);
+                      if (!o) setCatSearch("");
+                    }}
+                  >
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className="w-full flex items-center justify-between h-9 rounded-md border border-input bg-muted/30 px-3 text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors text-left"
+                      >
+                        <span className="flex min-w-0 items-center gap-2 truncate">
+                          {currentCat ? (
+                            <>
+                              <CategoryIcon icon={currentCat.icon} className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <span className="truncate font-medium text-foreground">{currentCat.name}</span>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground truncate">Select category</span>
+                          )}
+                        </span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground ml-2 opacity-60" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      className="p-1.5 w-[var(--radix-popover-trigger-width)] min-w-[260px] shadow-lg z-50"
+                      align="start"
+                    >
+                      <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-border/60 mb-1">
+                        <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <input
+                          autoFocus
+                          type="text"
+                          value={catSearch}
+                          onChange={(e) => setCatSearch(e.target.value)}
+                          placeholder="Search category..."
+                          className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                        />
+                        {catSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setCatSearch("")}
+                            className="text-muted-foreground hover:text-foreground p-0.5"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
                         )}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          <span className="flex items-center gap-2">
-                            <CategoryIcon icon={c.icon} className="h-4 w-4 shrink-0" />
-                            <span>{c.name}</span>
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto space-y-0.5 py-0.5">
+                        {filteredCategories.length === 0 ? (
+                          <div className="py-3 text-center text-xs text-muted-foreground">
+                            No categories found
+                          </div>
+                        ) : (
+                          filteredCategories.map((c) => {
+                            const isSelected = form.categoryId === c.id;
+                            return (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  handleCategoryChange(c.id);
+                                  setCatOpen(false);
+                                  setCatSearch("");
+                                }}
+                                className={
+                                  "w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors text-left " +
+                                  (isSelected
+                                    ? "bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300 font-semibold"
+                                    : "hover:bg-accent text-foreground")
+                                }
+                              >
+                                <span className="flex items-center gap-2 truncate">
+                                  <CategoryIcon
+                                    icon={c.icon}
+                                    className="h-4 w-4 shrink-0 text-muted-foreground"
+                                  />
+                                  <span className="truncate">{c.name}</span>
+                                </span>
+                                {isSelected && (
+                                  <Check className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400 shrink-0 ml-1.5" />
+                                )}
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </Labeled>
 
                 <Labeled label="Author" required>
@@ -2623,6 +3108,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
               <button
                 type="button"
                 title="Insert Link (Ctrl+K)"
+                onMouseDown={() => saveSel()}
                 onClick={handleInsertLink}
                 className="h-8 w-8 rounded-md flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground"
               >
@@ -2639,7 +3125,11 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
               <button
                 type="button"
                 title="Insert Image (Paste URL, Upload, or Library)"
-                onClick={() => setImgDialog({ mode: "content" })}
+                onMouseDown={() => saveSel()}
+                onClick={() => {
+                  saveSel();
+                  setImgDialog({ mode: "content" });
+                }}
                 className="h-8 px-2.5 rounded-md flex items-center gap-1.5 hover:bg-muted text-muted-foreground hover:text-foreground text-xs font-medium transition-colors"
               >
                 <ImageIcon className="h-3.5 w-3.5 text-violet-500" />
@@ -2648,7 +3138,11 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
               <button
                 type="button"
                 title="Embed YouTube Video"
-                onClick={handleInsertVideo}
+                onMouseDown={() => saveSel()}
+                onClick={() => {
+                  saveSel();
+                  handleInsertVideo();
+                }}
                 className="h-8 px-2.5 rounded-md flex items-center gap-1.5 hover:bg-muted text-muted-foreground hover:text-foreground text-xs font-medium transition-colors"
               >
                 <Video className="h-3.5 w-3.5 text-red-500" />
@@ -2657,7 +3151,11 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
               <button
                 type="button"
                 title="Use / Save Guide Templates"
-                onClick={() => setTemplateModalOpen(true)}
+                onMouseDown={() => saveSel()}
+                onClick={() => {
+                  saveSel();
+                  setTemplateModalOpen(true);
+                }}
                 className="h-8 px-2.5 rounded-md flex items-center gap-1.5 hover:bg-violet-500/10 text-violet-600 dark:text-violet-400 text-xs font-semibold transition-colors border border-violet-500/30"
               >
                 <Sparkles className="h-3.5 w-3.5 text-violet-500" />
@@ -2666,7 +3164,11 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
               <button
                 type="button"
                 title="Insert Table (3x3)"
-                onClick={handleInsertTable}
+                onMouseDown={() => saveSel()}
+                onClick={() => {
+                  saveSel();
+                  handleInsertTable();
+                }}
                 className="h-8 w-8 rounded-md flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground"
               >
                 <Table className="h-4 w-4" />
@@ -2747,6 +3249,105 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
 
             {/* Editable Content Canvas (Exact 1-to-1 Match with BlogEditor) */}
             <div className="relative">
+              {/* Floating Link options bar - positioned right above the clicked link */}
+              {linkBar && (
+                <div
+                  className="absolute z-50 rounded-xl border border-sky-300/80 bg-white/95 dark:border-sky-700/80 dark:bg-zinc-900/95 px-3 py-2 flex flex-wrap items-center gap-2 text-xs shadow-xl backdrop-blur animate-in fade-in zoom-in-95 duration-150"
+                  style={{
+                    top: linkBarPos.top,
+                    left: linkBarPos.left,
+                  }}
+                >
+                  <Link2 className="h-4 w-4 text-sky-500 shrink-0" />
+                  <span
+                    className="font-mono text-[11.5px] font-medium text-foreground truncate max-w-[170px] sm:max-w-xs"
+                    title={linkBar.href}
+                  >
+                    {linkBar.href}
+                  </span>
+
+                  {/* Destination Status Badges */}
+                  {linkBar.status === "kb_article" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      ✓ KB Guide
+                    </span>
+                  )}
+                  {linkBar.status === "vinimay_page" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                      ✓ Vinimay Page
+                    </span>
+                  )}
+                  {linkBar.status === "external" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+                      External
+                    </span>
+                  )}
+
+                  <Separator orientation="vertical" className="h-4" />
+
+                  {/* Destination button opens real website */}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-sky-700 hover:text-sky-800 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900/50"
+                    onClick={() => {
+                      window.open(linkBar.targetUrl, "_blank");
+                    }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5 mr-1" />
+                    Open {linkBar.status === "vinimay_page" ? "Page" : "Target"} ↗
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      openLinkDialog({
+                        url: linkBar.href,
+                        text: linkBar.text,
+                        editAnchor: linkBar.el,
+                        newTab: linkBar.el.getAttribute("target") === "_blank",
+                      });
+                    }}
+                  >
+                    Edit URL
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                    onClick={() => {
+                      const parent = linkBar.el.parentNode;
+                      if (parent) {
+                        while (linkBar.el.firstChild) {
+                          parent.insertBefore(linkBar.el.firstChild, linkBar.el);
+                        }
+                        linkBar.el.remove();
+                      }
+                      setLinkBar(null);
+                      setDirty(true);
+                      if (editorRef.current) {
+                        setForm((prev) => ({ ...prev, contentHtml: editorRef.current.innerHTML }));
+                      }
+                    }}
+                  >
+                    <Link2Off className="h-3.5 w-3.5 mr-1" />
+                    Unlink
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground ml-auto"
+                    onClick={() => setLinkBar(null)}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
+
               {/* Floating Image Action Bar */}
               {imgBar && (
                 <div
@@ -3109,10 +3710,14 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                     }
                   }, 120);
                 }}
-                onClick={handleEditorClick}
+                onClick={(e) => {
+                  saveSel();
+                  handleEditorClick(e);
+                }}
                 onKeyDown={handleEditorKeyDown}
                 onPaste={handleEditorPaste}
                 onMouseUp={saveSel}
+                onKeyUp={saveSel}
                 onInput={() => {
                   setDirty(true);
                   if (editorRef.current) {
@@ -3381,6 +3986,341 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
           </Card>
         </div>
       </div>
+
+      {/* Advanced Link Dialog (KB Guides, Vinimay Pages, External - 1-to-1 BlogEditor Match) */}
+      <Dialog
+        open={!!linkDialog}
+        onOpenChange={(o) => {
+          if (!o) setLinkDialog(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Link2 className="h-4 w-4 text-violet-500" />
+              {linkDialog?.editAnchor ? "Edit Link" : "Insert Link"}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Link to other Knowledge Base guides, Vinimay website pages, or any
+              external reference.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5 py-1 w-full min-w-0 overflow-hidden">
+            {/* Mode selection tabs */}
+            <Tabs
+              value={linkTab}
+              onValueChange={(val) => {
+                setLinkTab(val);
+              }}
+              className="w-full min-w-0"
+            >
+              <TabsList className="grid grid-cols-3 w-full h-9 bg-muted/60 p-1 rounded-lg">
+                <TabsTrigger
+                  value="kb"
+                  className="text-xs px-1.5 h-7 font-medium rounded-md data-[state=active]:bg-background data-[state=active]:shadow-xs truncate"
+                >
+                  📚 KB Guide
+                </TabsTrigger>
+                <TabsTrigger
+                  value="vinimay"
+                  className="text-xs px-1.5 h-7 font-medium rounded-md data-[state=active]:bg-background data-[state=active]:shadow-xs truncate"
+                >
+                  🌐 Vinimay Page
+                </TabsTrigger>
+                <TabsTrigger
+                  value="external"
+                  className="text-xs px-1.5 h-7 font-medium rounded-md data-[state=active]:bg-background data-[state=active]:shadow-xs truncate"
+                >
+                  🔗 External / URL
+                </TabsTrigger>
+              </TabsList>
+
+              {/* TAB 1: Internal KB Guide Search & Select */}
+              {linkTab === "kb" && (
+                <div className="pt-2.5 space-y-2 w-full min-w-0">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    Select a published guide. Generates safe internal link (
+                    <code className="text-violet-600 dark:text-violet-400 font-semibold">
+                      /knowledge-base/category/slug
+                    </code>
+                    ):
+                  </p>
+                  <div className="relative w-full min-w-0">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <Input
+                      placeholder="Search published guides by title or slug…"
+                      value={kbLinkSearch}
+                      onChange={(e) => setKbLinkSearch(e.target.value)}
+                      className="pl-8 h-8 text-xs bg-background w-full"
+                    />
+                  </div>
+                  <div className="max-h-44 overflow-y-auto space-y-1.5 rounded-lg border border-border p-1.5 bg-muted/20 w-full min-w-0">
+                    {(allArticlesList || [])
+                      .filter(
+                        (a) =>
+                          a.id !== articleId &&
+                          a.status === "published" &&
+                          a.slug
+                      )
+                      .filter((a) => {
+                        if (!kbLinkSearch.trim()) return true;
+                        const raw = kbLinkSearch.trim().toLowerCase();
+                        const aSlug = (a.slug || "").toLowerCase();
+                        const aTitle = (a.title || "").toLowerCase();
+                        return aTitle.includes(raw) || aSlug.includes(raw);
+                      })
+                      .slice(0, 15)
+                      .map((a) => {
+                        const targetSlug = `/knowledge-base/${a.categorySlug || "guide"}/${a.slug}`;
+                        const isSelected = linkDialog?.url === targetSlug;
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => {
+                              setLinkDialog((d) => ({
+                                ...d,
+                                url: targetSlug,
+                                text: d.text || a.title,
+                                newTab: false,
+                              }));
+                            }}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs transition-colors flex flex-col gap-0.5 border min-w-0 overflow-hidden ${
+                              isSelected
+                                ? "bg-violet-50 text-violet-950 font-semibold dark:bg-violet-950/70 dark:text-violet-100 border-violet-400 dark:border-violet-700 shadow-xs"
+                                : "hover:bg-muted/80 border-transparent hover:border-border text-foreground"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 w-full min-w-0">
+                              <span className="truncate flex-1 font-medium">
+                                {a.title}
+                              </span>
+                              {isSelected && (
+                                <Check className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400 shrink-0" />
+                              )}
+                            </div>
+                            <span className="font-mono text-[10.5px] text-muted-foreground truncate w-full">
+                              {targetSlug}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: Vinimay Main Website Pages */}
+              {linkTab === "vinimay" && (
+                <div className="pt-2.5 space-y-2.5 w-full min-w-0">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    Link to core product pages on Vinimay website:
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5 w-full">
+                    {[
+                      {
+                        label: "Home / Platform",
+                        url: "https://vinimay.sharda.co.in/",
+                      },
+                      {
+                        label: "Features",
+                        url: "https://vinimay.sharda.co.in/features",
+                      },
+                      {
+                        label: "Pricing",
+                        url: "https://vinimay.sharda.co.in/pricing",
+                      },
+                      {
+                        label: "Services",
+                        url: "https://vinimay.sharda.co.in/services",
+                      },
+                      {
+                        label: "Free Invoice",
+                        url: "https://vinimay.sharda.co.in/free-invoice",
+                      },
+                      {
+                        label: "About Us",
+                        url: "https://vinimay.sharda.co.in/about-us",
+                      },
+                    ].map((p) => (
+                      <Button
+                        key={p.url}
+                        type="button"
+                        variant={
+                          linkDialog?.url === p.url ? "default" : "outline"
+                        }
+                        size="sm"
+                        className="h-8 text-xs justify-start truncate w-full min-w-0"
+                        onClick={() => {
+                          setLinkDialog((d) => ({
+                            ...d,
+                            url: p.url,
+                            text: d.text || p.label,
+                            newTab: true,
+                          }));
+                        }}
+                      >
+                        <Globe className="h-3 w-3 mr-1.5 shrink-0 text-sky-500" />
+                        <span className="truncate">{p.label}</span>
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="w-full">
+                    <span className="text-[11px] text-muted-foreground font-medium">
+                      Or custom Vinimay section / subpage:
+                    </span>
+                    <Input
+                      value={
+                        linkDialog?.url?.startsWith(
+                          "https://vinimay.sharda.co.in"
+                        )
+                          ? linkDialog.url.replace(
+                              "https://vinimay.sharda.co.in",
+                              ""
+                            )
+                          : linkDialog?.url?.startsWith("/") &&
+                            !linkDialog?.url?.startsWith("/knowledge-base") &&
+                            !linkDialog?.url?.startsWith("/help-center")
+                          ? linkDialog.url
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        const path = val
+                          ? val.startsWith("/")
+                            ? val
+                            : "/" + val
+                          : "";
+                        setLinkDialog((d) => ({
+                          ...d,
+                          url: path
+                            ? `https://vinimay.sharda.co.in${path}`
+                            : "",
+                        }));
+                      }}
+                      placeholder="/features#gst-billing or /services/trip-transportation"
+                      className="h-8 text-xs mt-1 font-mono w-full"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: External Website URL */}
+              {linkTab === "external" && (
+                <div className="pt-2.5 space-y-2 w-full min-w-0">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    Enter any external reference (Govt portal, tax law, partner
+                    website):
+                  </p>
+                  <Input
+                    value={linkDialog?.url || ""}
+                    onChange={(e) =>
+                      setLinkDialog({ ...linkDialog, url: e.target.value })
+                    }
+                    placeholder="https://www.gst.gov.in or https://…"
+                    className="h-8 text-xs font-mono w-full"
+                    autoFocus
+                  />
+                </div>
+              )}
+            </Tabs>
+
+            {/* Link Text / Anchor text */}
+            <div className="space-y-1 w-full min-w-0">
+              <label className="text-[11.5px] font-medium text-foreground">
+                Link text (visible text in article)
+              </label>
+              <Input
+                value={linkDialog?.text || ""}
+                onChange={(e) =>
+                  setLinkDialog({ ...linkDialog, text: e.target.value })
+                }
+                placeholder="Anchor text"
+                className="h-8 text-xs w-full"
+              />
+            </div>
+
+            {/* Destination Preview & Classification */}
+            {linkDialog?.url &&
+              (() => {
+                const norm = normalizeLinkHref(linkDialog.url);
+                const isKb =
+                  norm.startsWith("/knowledge-base/") ||
+                  norm.startsWith("/help-center/");
+                const isVinimay =
+                  norm.includes("vinimay.sharda.co.in") ||
+                  norm.includes("vinimay.in");
+                const isAutoFixed = norm !== linkDialog.url.trim();
+
+                return (
+                  <div className="rounded-lg border bg-muted/40 p-2 text-xs space-y-1 w-full min-w-0 overflow-hidden">
+                    <div className="flex items-center justify-between gap-1 w-full min-w-0">
+                      <span className="text-[11px] text-muted-foreground font-medium shrink-0">
+                        Destination URL:
+                      </span>
+                      {isKb ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 border-emerald-300 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 font-semibold shrink-0"
+                        >
+                          ✓ KB Guide Link
+                        </Badge>
+                      ) : isVinimay ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 border-blue-300 text-blue-700 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-300 font-semibold shrink-0"
+                        >
+                          ✓ Vinimay Page
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 border-purple-300 text-purple-700 bg-purple-50 dark:bg-purple-950/40 dark:text-purple-300 font-semibold shrink-0"
+                        >
+                          🌐 External Resource
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="font-mono text-[11px] text-foreground truncate select-all w-full">
+                      {norm}
+                    </p>
+                    {isAutoFixed && (
+                      <p className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-medium">
+                        ⚡ URL automatically normalized and formatted for SEO!
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
+            {/* Open in new tab checkbox */}
+            <div className="flex items-center gap-2 pt-0.5">
+              <Checkbox
+                id="f-link-new-tab"
+                checked={!!linkDialog?.newTab}
+                onCheckedChange={(c) =>
+                  setLinkDialog((d) => ({ ...d, newTab: !!c }))
+                }
+              />
+              <label
+                htmlFor="f-link-new-tab"
+                className="text-xs text-muted-foreground cursor-pointer select-none"
+              >
+                Open in new browser tab
+              </label>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLinkDialog(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleApplyLink}>
+              {linkDialog?.editAnchor ? "Update link" : "Insert link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Image Dialog (Paste URL, Upload, Library - 1-to-1 Blog Editor Match) */}
       <ImageDialog
