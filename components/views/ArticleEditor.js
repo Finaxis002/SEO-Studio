@@ -2549,8 +2549,50 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
   const readTime = Math.max(1, Math.ceil(wordCount / 200));
   const outlineHeadings = useMemo(() => extractHeadings(form.contentHtml), [form.contentHtml]);
 
+  // Active heading index for real-time scrollspy
+  const [activeHeadingIdx, setActiveHeadingIdx] = useState(0);
+  const tocListRef = useRef(null);
+
+  // Scrollspy to detect active heading as user scrolls editor content
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    const handleScroll = () => {
+      const headings = editorRef.current?.querySelectorAll("h1, h2, h3");
+      if (!headings || headings.length === 0) return;
+
+      // Find heading currently closest to or just above reading line
+      let currentIdx = 0;
+      headings.forEach((el, idx) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.top <= 220) {
+          currentIdx = idx;
+        }
+      });
+
+      setActiveHeadingIdx(currentIdx);
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [form.contentHtml]);
+
+  // Auto-scroll TOC container to follow along with the active section
+  useEffect(() => {
+    if (!tocListRef.current) return;
+    const activeBtn = tocListRef.current.querySelector(
+      `[data-toc-idx="${activeHeadingIdx}"]`
+    );
+    if (activeBtn) {
+      activeBtn.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [activeHeadingIdx]);
+
   // Clickable Table of Contents heading jump
   const jumpToHeading = (idx) => {
+    setActiveHeadingIdx(idx);
     if (!editorRef.current) return;
     const headings = editorRef.current.querySelectorAll("h1, h2, h3");
     if (headings && headings[idx]) {
@@ -3810,37 +3852,57 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                   </p>
                 </div>
               ) : (
-                <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1">
-                  {outlineHeadings.map((h, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => jumpToHeading(idx)}
-                      className={`w-full text-left rounded-lg py-1.5 px-2.5 text-xs transition-all flex items-center gap-2 hover:bg-violet-50 hover:text-violet-900 dark:hover:bg-violet-950/40 dark:hover:text-violet-200 group ${
-                        h.level === "h1"
-                          ? "font-bold text-foreground bg-muted/30"
-                          : h.level === "h2"
-                          ? "pl-4 font-semibold text-foreground/90"
-                          : "pl-7 text-muted-foreground font-normal"
-                      }`}
-                      title={`Jump to: ${h.text}`}
-                    >
-                      <span
-                        className={`text-[10px] font-mono px-1.5 py-0.2 rounded shrink-0 font-bold uppercase ${
+                <div
+                  ref={tocListRef}
+                  className="space-y-1 max-h-[300px] overflow-y-auto pr-1 scroll-smooth"
+                >
+                  {outlineHeadings.map((h, idx) => {
+                    const isActive = activeHeadingIdx === idx;
+                    return (
+                      <button
+                        key={idx}
+                        data-toc-idx={idx}
+                        type="button"
+                        onClick={() => jumpToHeading(idx)}
+                        className={`w-full text-left rounded-lg py-1.5 px-2.5 text-xs transition-all flex items-center gap-2 group relative ${
+                          isActive
+                            ? "bg-violet-100/90 text-violet-950 font-bold dark:bg-violet-950/70 dark:text-violet-100 shadow-2xs border-l-[3px] border-violet-600 pl-2"
+                            : "hover:bg-muted text-muted-foreground hover:text-foreground font-normal"
+                        } ${
                           h.level === "h1"
-                            ? "bg-violet-100 text-violet-700 dark:bg-violet-900/60 dark:text-violet-300"
+                            ? ""
                             : h.level === "h2"
-                            ? "bg-muted text-muted-foreground"
-                            : "bg-transparent text-muted-foreground/70"
+                            ? "ml-2.5"
+                            : "ml-5"
                         }`}
+                        title={`Jump to: ${h.text}`}
                       >
-                        {h.level}
-                      </span>
-                      <span className="truncate flex-1 group-hover:underline">
-                        {h.text}
-                      </span>
-                    </button>
-                  ))}
+                        <span
+                          className={`text-[9.5px] font-mono px-1.5 py-0.5 rounded shrink-0 font-bold uppercase transition-colors ${
+                            isActive
+                              ? "bg-violet-600 text-white shadow-xs"
+                              : h.level === "h1"
+                              ? "bg-violet-100 text-violet-700 dark:bg-violet-900/60 dark:text-violet-300"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {h.level}
+                        </span>
+                        <span
+                          className={`truncate flex-1 ${
+                            isActive
+                              ? "font-semibold text-violet-950 dark:text-violet-100"
+                              : ""
+                          }`}
+                        >
+                          {h.text}
+                        </span>
+                        {isActive && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-violet-600 dark:bg-violet-400 shrink-0 mr-1 animate-pulse" />
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
