@@ -36,16 +36,13 @@ export default function IconifyPicker({ value, onChange }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [emojis, setEmojis] = useState([]);
-const [emojiLoading, setEmojiLoading] = useState(false);
-const [emojiError, setEmojiError] = useState("");
+  const [emojiLoading, setEmojiLoading] = useState(false);
+  const [emojiError, setEmojiError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadIcons() {
-      setLoading(true);
-      setError("");
-
       try {
         const names = query.trim()
           ? await searchIconifyIcons(query, 60)
@@ -69,7 +66,11 @@ const [emojiError, setEmojiError] = useState("");
       }
     }
 
-    const timer = setTimeout(loadIcons, query.trim() ? 300 : 0);
+    setLoading(true);
+    setError("");
+    setIcons([]);
+
+    const timer = setTimeout(loadIcons, query.trim() ? 150 : 0);
 
     return () => {
       cancelled = true;
@@ -77,62 +78,70 @@ const [emojiError, setEmojiError] = useState("");
     };
   }, [query]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!value || !value.includes(":") || iconData[value]) return;
+
+    fetchIconifyIcons([value])
+      .then((data) => {
+        if (!cancelled) {
+          setIconData((previous) => ({ ...previous, ...data }));
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message || "Unable to load the selected icon.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [value, iconData]);
+
 
   useEffect(() => {
   let cancelled = false;
 
-  const timer = setTimeout(async () => {
+    setEmojis([]);
+    setEmojiError("");
+
     if (!query.trim()) {
-      setEmojis([]);
-      return;
+      setEmojiLoading(false);
+      return () => {
+        cancelled = true;
+      };
     }
 
     setEmojiLoading(true);
-    setEmojiError("");
 
-    try {
-      const results = await searchEmojis(query);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchEmojis(query);
 
-      if (!cancelled) {
-        setEmojis(results);
+        if (!cancelled) {
+          setEmojis(results);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEmojiError(error.message || "Unable to load emojis.");
+        }
+      } finally {
+        if (!cancelled) {
+          setEmojiLoading(false);
+        }
       }
-    } catch (error) {
-      if (!cancelled) {
-        setEmojiError(error.message || "Unable to load emojis.");
-      }
-    } finally {
-      if (!cancelled) {
-        setEmojiLoading(false);
-      }
-    }
-  }, 300);
+    }, 150);
 
-  return () => {
-    cancelled = true;
-    clearTimeout(timer);
-  };
-}, [query]);
-  async function loadEmojis() {
-  if (!query.trim()) {
-    setEmojis([]);
-    return;
-  }
-
-  setEmojiLoading(true);
-  setEmojiError("");
-
-  try {
-    const results = await searchEmojis(query);
-    setEmojis(results);
-  } catch (error) {
-    setEmojiError(error.message || "Unable to load emojis.");
-  } finally {
-    setEmojiLoading(false);
-  }
-}
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
 
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 space-y-3">
       <Input
         value={query}
         onChange={(event) => setQuery(event.target.value)}
@@ -142,7 +151,7 @@ const [emojiError, setEmojiError] = useState("");
 
       {/* EMOJI RESULTS */}
       {query.trim() && (
-        <div className="space-y-2">
+        <div className="min-w-0 space-y-2">
           <p className="text-xs font-semibold text-muted-foreground">
             Emojis
           </p>
@@ -161,13 +170,11 @@ const [emojiError, setEmojiError] = useState("");
 
           {!emojiLoading && !emojiError && emojis.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              No matching emojis found.
+              No emojis found.
             </p>
           )}
 
-         
-<div className="grid max-h-40 grid-cols-5 gap-2 overflow-y-auto overscroll-contain p-1 sm:grid-cols-6">
-
+          <div className="grid max-h-40 grid-cols-5 gap-2 overflow-y-auto overscroll-contain p-1 sm:grid-cols-6">
             {emojis.map((item, index) => {
               const selected = value === item.emoji;
 
@@ -200,7 +207,7 @@ const [emojiError, setEmojiError] = useState("");
         </p>
 
         <div
-          className="grid max-h-48 grid-cols-5 gap-2 overflow-y-auto p-1 sm:grid-cols-6"
+          className="grid max-h-48 grid-cols-5 gap-2 overflow-y-auto overscroll-contain p-1 sm:grid-cols-6"
           aria-label="Available icons"
         >
           {icons.map((id) => {
@@ -226,7 +233,7 @@ const [emojiError, setEmojiError] = useState("");
                     src={src}
                     alt=""
                     aria-hidden="true"
-                    className="h-6 w-6"
+                    className="h-6 w-6 dark:brightness-0 dark:invert"
                   />
                 ) : (
                   <span className="text-xs text-muted-foreground">
@@ -258,9 +265,31 @@ const [emojiError, setEmojiError] = useState("");
       )}
 
       {value && (
-        <p className="break-all text-xs text-muted-foreground">
-          Selected: <span className="font-mono">{value}</span>
-        </p>
+        <div
+          className="flex h-11 w-11 items-center justify-center rounded-lg border border-primary bg-primary/10 ring-1 ring-primary"
+          role="img"
+          aria-label="Selected category icon"
+          title="Selected category icon"
+        >
+          {value.includes(":") ? (
+            iconDataToSvgUrl(iconData[value]) ? (
+              <img
+                src={iconDataToSvgUrl(iconData[value])}
+                alt=""
+                aria-hidden="true"
+                className="h-6 w-6 dark:brightness-0 dark:invert"
+              />
+            ) : (
+              <span className="text-xs text-muted-foreground" aria-hidden="true">
+                {loading ? "…" : "?"}
+              </span>
+            )
+          ) : (
+            <span className="text-2xl" aria-hidden="true">
+              {value}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
