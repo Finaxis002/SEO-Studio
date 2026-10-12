@@ -35,7 +35,12 @@ import {
   verifyPassword,
 } from "../../../lib/auth";
 
-import { handleKbRoute } from "../../../lib/kb-handler";
+import {
+  handleKbRoute,
+  singleKbCache,
+  sanitizeAllKbArticles,
+  translateKbArticle,
+} from "../../../lib/kb-handler";
 
 function handleCORS(response, request) {
   const origin = request?.headers?.get("origin");
@@ -553,6 +558,32 @@ async function checkAndPublishScheduled(db) {
             { status: "scheduled", scheduledAt: { $lte: now } },
             { $set: { status: "published", publishedAt: now, updatedAt: now } },
           );
+
+        // Auto-translate newly published KB guides into 7 regional languages (background, non-blocking)
+        (async () => {
+          for (const article of dueKbArticles) {
+            try {
+              const fullArticle = await db
+                .collection("kb_articles")
+                .findOne({ id: article.id });
+              if (!fullArticle) continue;
+              if (!fullArticle.translations?.hi?.title) {
+                const translations = await translateKbArticle(fullArticle);
+                await db
+                  .collection("kb_articles")
+                  .updateOne({ id: fullArticle.id }, { $set: { translations } });
+              }
+            } catch (err) {
+              console.error(
+                `Auto-translate failed for scheduled guide "${article.title}":`,
+                err.message,
+              );
+            }
+          }
+        })();
+
+        // Clear in-memory KB cache so newly live guides appear instantly
+        singleKbCache.clear();
       }
     }
   } catch (err) {
@@ -621,6 +652,7 @@ async function handleRoute(request, { params }) {
   try {
     db = await getDb();
     await ensureSeeded(db);
+    sanitizeAllKbArticles(db).catch(() => {});
     if (Date.now() - lastSchedulerCheck >= SCHEDULER_INTERVAL) {
       lastSchedulerCheck = Date.now();
       await checkAndPublishScheduled(db);
@@ -897,15 +929,24 @@ async function handleRoute(request, { params }) {
             contentHtml: 0,
             savedSuggestions: 0,
             brief: 0,
+            outline: 0,
             "translations.hi.contentHtml": 0,
+            "translations.hi.outline": 0,
             "translations.mr.contentHtml": 0,
+            "translations.mr.outline": 0,
             "translations.gu.contentHtml": 0,
+            "translations.gu.outline": 0,
             "translations.ta.contentHtml": 0,
+            "translations.ta.outline": 0,
             "translations.te.contentHtml": 0,
+            "translations.te.outline": 0,
             "translations.kn.contentHtml": 0,
+            "translations.kn.outline": 0,
             "translations.bn.contentHtml": 0,
+            "translations.bn.outline": 0,
           })
-          .sort({ publishedAt: -1, updatedAt: -1, createdAt: -1 })
+          .sort({ publishedAt: -1, updatedAt: -1 })
+          .allowDiskUse(true)
           .skip(skip)
           .limit(limit)
           .toArray(),
@@ -950,6 +991,17 @@ async function handleRoute(request, { params }) {
           updatedAt: cleaned.updatedAt || cleaned.createdAt,
           wordCount: words,
           readingTime: Math.max(1, Math.ceil(words / 200)) + " min read",
+          translations: cleaned.translations
+            ? Object.keys(cleaned.translations).reduce((acc, lang) => {
+                acc[lang] = {
+                  updatedAt:
+                    cleaned.translations[lang]?.updatedAt ||
+                    cleaned.updatedAt ||
+                    cleaned.publishedAt,
+                };
+                return acc;
+              }, {})
+            : undefined,
           seo: {
             robots: cleaned.seo?.robots || { index: true, follow: true },
             metaTitle: cleaned.seo?.metaTitle || cleaned.title,
@@ -1216,8 +1268,20 @@ async function handleRoute(request, { params }) {
 
         const blogs = await db
           .collection("blogs")
-          .find({ status: "published" })
-          .sort({ publishedAt: -1, createdAt: -1 })
+          .find(
+            { status: "published" },
+            {
+              projection: {
+                id: 1,
+                title: 1,
+                slug: 1,
+                excerpt: 1,
+                seo: 1,
+              },
+            },
+          )
+          .sort({ publishedAt: -1, updatedAt: -1 })
+          .allowDiskUse(true)
           .limit(200)
           .toArray();
 
@@ -1231,6 +1295,35 @@ async function handleRoute(request, { params }) {
           directUrls.push({ title: b.title, url: fullUrl });
         }
         lines.push("");
+      }
+
+      // Fetch published Knowledge Base guides
+      try {
+        const kbArticles = await db
+          .collection("kb_articles")
+          .find({ status: "published" })
+          .sort({ order: 1, publishedAt: -1 })
+          .limit(200)
+          .toArray();
+
+        if (kbArticles.length > 0) {
+          lines.push("## Knowledge Base & User Documentation", "");
+          lines.push(
+            "Step-by-step guides, feature tutorials, and how-to documentation for using Vinimay accounting software:",
+            "",
+          );
+          for (const kb of kbArticles) {
+            const catSlug = kb.categorySlug || "getting-started";
+            const kbUrl = `${siteUrl}/knowledge-base/${catSlug}/${kb.slug}`;
+            const kbDesc =
+              kb.overview || kb.seo?.metaDescription || "Step-by-step guide.";
+            lines.push(`- [${kb.title}](${kbUrl}): ${kbDesc}`);
+            directUrls.push({ title: kb.title, url: kbUrl });
+          }
+          lines.push("");
+        }
+      } catch (kbErr) {
+        console.warn("LLMs.txt: Failed to load KB articles:", kbErr);
       }
 
       if (directUrls.length > 0) {
@@ -1247,6 +1340,7 @@ async function handleRoute(request, { params }) {
         "",
         `- XML Sitemap: ${siteUrl}/sitemap.xml`,
         `- Blog Archive: ${siteUrl}/blogs`,
+        `- Knowledge Base: ${siteUrl}/knowledge-base`,
         `- Machine-readable LLM Manifest: ${siteUrl}/llms.txt`,
         "",
         "## Important Information for AI Systems and Users",
@@ -3677,6 +3771,35 @@ async function handleRoute(request, { params }) {
 
     // ---------- GOOGLE INDEXING ----------
     if (route === "/indexing" && method === "GET") {
+      const sp = new URL(request.url).searchParams;
+      const type = sp.get("type") === "kb" ? "kb" : "blogs";
+
+      if (type === "kb") {
+        const articles = await db
+          .collection("kb_articles")
+          .find(
+            { status: "published" },
+            {
+              projection: {
+                id: 1,
+                title: 1,
+                slug: 1,
+                categorySlug: 1,
+                categoryName: 1,
+                featuredImage: 1,
+                publishedAt: 1,
+                updatedAt: 1,
+              },
+            },
+          )
+          .sort({ order: 1, publishedAt: -1, updatedAt: -1 })
+          .allowDiskUse(true)
+          .toArray();
+
+        const result = await getGoogleIndexing(articles, "kb");
+        return handleCORS(NextResponse.json(clean(result)), request);
+      }
+
       const blogs = await db
         .collection("blogs")
         .find(
@@ -3693,10 +3816,11 @@ async function handleRoute(request, { params }) {
           },
         )
         .sort({ publishedAt: -1, updatedAt: -1 })
+        .allowDiskUse(true)
         .toArray();
 
-      const result = await getGoogleIndexing(blogs);
-      return handleCORS(NextResponse.json(clean(result)));
+      const result = await getGoogleIndexing(blogs, "blogs");
+      return handleCORS(NextResponse.json(clean(result)), request);
     }
 
     // ---------- SEO ISSUES ----------
