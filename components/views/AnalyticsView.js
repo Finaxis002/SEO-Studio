@@ -20,6 +20,7 @@ import {
   Search,
   Image as ImageIcon,
   FileText,
+  BookOpen,
   X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,7 +38,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetcher, fmtNum, fmtDate, getImageThumbnailUrl } from "@/lib/client";
 import { TrendChart, PositionChart, Donut } from "../charts";
-import { EmptyState } from "../bits";
+import { EmptyState, Pagination } from "../bits";
 
 const RANGES = [
   { v: "7", l: "7 Days" },
@@ -52,9 +53,12 @@ export default function AnalyticsView({ initialTab, navigate }) {
   const [tab, setTab] = useState(initialTab || "overview");
   const [indexSearch, setIndexSearch] = useState("");
   const [indexFilter, setIndexFilter] = useState("all");
+  const [indexType, setIndexType] = useState("blogs"); // "blogs" | "kb"
+  const [indexPage, setIndexPage] = useState(1);
+  const [indexLimit, setIndexLimit] = useState(25);
   const { data, error } = useSWR("/api/analytics?range=" + range, fetcher);
   const { data: indexData, isLoading: indexLoading } = useSWR(
-    tab === "indexing" ? "/api/indexing" : null,
+    tab === "indexing" ? `/api/indexing?type=${indexType}` : null,
     fetcher,
   );
 
@@ -430,6 +434,51 @@ export default function AnalyticsView({ initialTab, navigate }) {
       {/* Google Indexing Tab */}
       {tab === "indexing" && (
         <div className="space-y-4">
+          {/* Sub-toggle: Blogs vs Knowledge Base Indexing */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="inline-flex p-1 bg-muted/70 rounded-lg border border-border/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setIndexType("blogs");
+                  setIndexSearch("");
+                  setIndexFilter("all");
+                  setIndexPage(1);
+                }}
+                className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  indexType === "blogs"
+                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Blogs Indexing
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIndexType("kb");
+                  setIndexSearch("");
+                  setIndexFilter("all");
+                  setIndexPage(1);
+                }}
+                className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  indexType === "kb"
+                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                Knowledge Base Indexing
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {indexType === "kb"
+                ? "Monitoring guides under /knowledge-base/*"
+                : "Monitoring posts under /blogs/*"}
+            </p>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Card className="card-hover border-emerald-500/30 bg-emerald-50/30 dark:bg-emerald-950/20">
               <CardContent className="p-4">
@@ -447,7 +496,7 @@ export default function AnalyticsView({ initialTab, navigate }) {
                 <p className="text-[11.5px] text-muted-foreground mt-0.5">
                   {indexLoading
                     ? "Checking Google Search Console…"
-                    : `${indexData?.summary?.rate || 0}% of published blogs are indexed`}
+                    : `${indexData?.summary?.rate || 0}% of published ${indexType === "kb" ? "guides" : "blogs"} are indexed`}
                 </p>
               </CardContent>
             </Card>
@@ -493,7 +542,9 @@ export default function AnalyticsView({ initialTab, navigate }) {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
                 <div>
                   <CardTitle className="text-[15px]">
-                    Published Blogs Index Status
+                    {indexType === "kb"
+                      ? "Published Knowledge Base Guides Index Status"
+                      : "Published Blogs Index Status"}
                   </CardTitle>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Verified via Google Search Console API (90d)
@@ -503,21 +554,35 @@ export default function AnalyticsView({ initialTab, navigate }) {
                   <div className="relative w-full sm:w-56">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                     <Input
-                      placeholder="Search blogs…"
+                      placeholder={
+                        indexType === "kb" ? "Search guides…" : "Search blogs…"
+                      }
                       value={indexSearch}
-                      onChange={(e) => setIndexSearch(e.target.value)}
+                      onChange={(e) => {
+                        setIndexSearch(e.target.value);
+                        setIndexPage(1);
+                      }}
                       className="pl-8 h-8 text-xs bg-muted/40"
                     />
                     {indexSearch && (
                       <button
-                        onClick={() => setIndexSearch("")}
+                        onClick={() => {
+                          setIndexSearch("");
+                          setIndexPage(1);
+                        }}
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
                     )}
                   </div>
-                  <Select value={indexFilter} onValueChange={setIndexFilter}>
+                  <Select
+                    value={indexFilter}
+                    onValueChange={(val) => {
+                      setIndexFilter(val);
+                      setIndexPage(1);
+                    }}
+                  >
                     <SelectTrigger className="w-[150px] h-8 text-xs bg-muted/40">
                       <SelectValue />
                     </SelectTrigger>
@@ -539,6 +604,7 @@ export default function AnalyticsView({ initialTab, navigate }) {
                       onClick={() => {
                         setIndexSearch("");
                         setIndexFilter("all");
+                        setIndexPage(1);
                       }}
                     >
                       Clear
@@ -556,8 +622,9 @@ export default function AnalyticsView({ initialTab, navigate }) {
                 </div>
               ) : (indexData?.items || []).length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
-                  No published blogs found. Publish blogs to see their Google
-                  indexing status.
+                  No published {indexType === "kb" ? "guides" : "blogs"} found.
+                  Publish {indexType === "kb" ? "guides" : "blogs"} to see their
+                  Google indexing status.
                 </div>
               ) : (
                 (() => {
@@ -570,7 +637,8 @@ export default function AnalyticsView({ initialTab, navigate }) {
                       const q = indexSearch.toLowerCase();
                       return (
                         item.title?.toLowerCase().includes(q) ||
-                        item.slug?.toLowerCase().includes(q)
+                        item.slug?.toLowerCase().includes(q) ||
+                        item.categoryName?.toLowerCase().includes(q)
                       );
                     }
                     return true;
@@ -579,18 +647,28 @@ export default function AnalyticsView({ initialTab, navigate }) {
                   if (filtered.length === 0) {
                     return (
                       <div className="p-8 text-center text-sm text-muted-foreground">
-                        No blogs match your filter criteria.
+                        No {indexType === "kb" ? "guides" : "blogs"} match your
+                        filter criteria.
                       </div>
                     );
                   }
 
+                  const total = filtered.length;
+                  const pages = Math.ceil(total / indexLimit) || 1;
+                  const validPage = Math.min(Math.max(1, indexPage), pages);
+                  const paginated = filtered.slice(
+                    (validPage - 1) * indexLimit,
+                    validPage * indexLimit,
+                  );
+
                   return (
-                    <div className="overflow-x-auto">
+                    <div>
+                      <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b border-border/60 bg-muted/30 text-muted-foreground">
                             <th className="text-left font-semibold px-4 py-2.5">
-                              Blog
+                              {indexType === "kb" ? "Guide / Document" : "Blog"}
                             </th>
                             <th className="text-left font-semibold px-3 py-2.5">
                               Published
@@ -610,7 +688,7 @@ export default function AnalyticsView({ initialTab, navigate }) {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/60">
-                          {filtered.map((item) => (
+                          {paginated.map((item) => (
                             <tr
                               key={item.id}
                               className="hover:bg-accent/40 transition-colors"
@@ -631,22 +709,46 @@ export default function AnalyticsView({ initialTab, navigate }) {
                                     />
                                   ) : (
                                     <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center border border-border shrink-0 text-muted-foreground">
-                                      <ImageIcon className="h-4 w-4" />
+                                      {indexType === "kb" ? (
+                                        <BookOpen className="h-4 w-4" />
+                                      ) : (
+                                        <ImageIcon className="h-4 w-4" />
+                                      )}
                                     </div>
                                   )}
-                                  <div className="min-w-0 max-w-[260px] sm:max-w-[320px]">
+                                  <div className="min-w-0 max-w-[260px] sm:max-w-[340px]">
                                     <p
                                       onClick={() =>
-                                        navigate?.("blog", { id: item.id })
+                                        navigate?.(
+                                          indexType === "kb"
+                                            ? "kb-detail"
+                                            : "blog",
+                                          { id: item.id },
+                                        )
                                       }
                                       className="font-medium text-[13px] truncate text-foreground hover:text-primary transition-colors cursor-pointer"
                                       title={item.title}
                                     >
                                       {item.title}
                                     </p>
-                                    <p className="text-[11px] text-muted-foreground truncate font-mono">
-                                      /blogs/{item.slug}
-                                    </p>
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                      <p className="text-[11px] text-muted-foreground truncate font-mono">
+                                        {indexType === "kb"
+                                          ? `/knowledge-base/${item.categorySlug || "getting-started"}/${item.slug}`
+                                          : `/blogs/${item.slug}`}
+                                      </p>
+                                      {item.fullUrl && (
+                                        <a
+                                          href={item.fullUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-muted-foreground hover:text-primary shrink-0 transition-colors"
+                                          title="Open live page on Vinimay"
+                                        >
+                                          <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               </td>
@@ -688,8 +790,27 @@ export default function AnalyticsView({ initialTab, navigate }) {
                         </tbody>
                       </table>
                     </div>
-                  );
-                })()
+
+                    {total > 0 && (
+                      <div className="p-3 border-t border-border/60 bg-muted/10">
+                        <Pagination
+                          page={validPage}
+                          pages={pages}
+                          total={total}
+                          limit={indexLimit}
+                          onPage={setIndexPage}
+                          onLimitChange={(newLimit) => {
+                            setIndexLimit(newLimit);
+                            setIndexPage(1);
+                          }}
+                          pageSizeOptions={[10, 25, 50, 100]}
+                          itemName={indexType === "kb" ? "guides" : "blogs"}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
               )}
             </CardContent>
           </Card>
