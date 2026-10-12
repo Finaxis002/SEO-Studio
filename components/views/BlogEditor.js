@@ -106,6 +106,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import FaqEditorCard from "../ui/FaqEditorCard";
 import {
   api,
   fetcher,
@@ -2080,31 +2081,6 @@ export default function BlogEditor({
     }
   }
 
-  const handleAddFaq = () => {
-    setDirty(true);
-    setForm((prev) => ({
-      ...prev,
-      faqs: [...(prev.faqs || []), { question: "", answer: "" }],
-    }));
-  };
-
-  const handleRemoveFaq = (idx) => {
-    setDirty(true);
-    setForm((prev) => ({
-      ...prev,
-      faqs: (prev.faqs || []).filter((_, i) => i !== idx),
-    }));
-  };
-
-  const handleFaqChange = (idx, field, val) => {
-    setDirty(true);
-    setForm((prev) => {
-      const updated = [...(prev.faqs || [])];
-      updated[idx] = { ...updated[idx], [field]: val };
-      return { ...prev, faqs: updated };
-    });
-  };
-
   async function optimizeFeatured(mode) {
     const url = form.featuredImage?.url;
     if (!url) {
@@ -3905,80 +3881,24 @@ export default function BlogEditor({
             </CardContent>
           </Card>
 
-          {/* Frequently Asked Questions (FAQs) Builder Card */}
-          <Card className="border-border/70 shadow-xs overflow-hidden mt-6">
-            <CardHeader className="p-6 pb-4 border-b border-border/50 flex flex-row items-center justify-between gap-4">
-              <div>
-                <CardTitle className="text-base font-bold text-foreground">
-                  Frequently Asked Questions (FAQs)
-                </CardTitle>
-                <CardDescription className="text-xs text-muted-foreground mt-1">
-                  Add common questions &amp; answers. These render as an interactive accordion on the blog page and generate Google FAQPage Schema for rich search results.
-                </CardDescription>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleAddFaq}
-                className="text-xs font-semibold rounded-xl border-dashed border-border hover:border-foreground text-foreground shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" /> Add FAQ
-              </Button>
-            </CardHeader>
-            <CardContent className="p-6 space-y-4">
-              {(form.faqs || []).map((faq, idx) => (
-                <div
-                  key={idx}
-                  className="p-4 rounded-xl border border-border/70 bg-muted/20 space-y-3 relative group"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                      FAQ #{idx + 1}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveFaq(idx)}
-                      className="text-muted-foreground hover:text-red-600 h-7 w-7 p-0 rounded-lg"
-                      title="Delete FAQ"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-foreground/80 mb-1.5 block">
-                      Question
-                    </label>
-                    <Input
-                      value={faq.question || ""}
-                      onChange={(e) => handleFaqChange(idx, "question", e.target.value)}
-                      placeholder="e.g. What are the key compliance requirements for GST registration?"
-                      className="rounded-xl border-border bg-background"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-foreground/80 mb-1.5 block">
-                      Answer
-                    </label>
-                    <Textarea
-                      value={faq.answer || ""}
-                      onChange={(e) => handleFaqChange(idx, "answer", e.target.value)}
-                      rows={2}
-                      placeholder="Provide a clear, helpful answer..."
-                      className="rounded-xl border-border bg-background"
-                    />
-                  </div>
-                </div>
-              ))}
-              {(!form.faqs || form.faqs.length === 0) && (
-                <div className="text-center py-6 text-xs text-muted-foreground border border-dashed border-border rounded-xl">
-                  No FAQs added yet. Click &quot;Add FAQ&quot; to add questions for your readers and Google Rich Snippets.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <FaqEditorCard
+            faqs={form.faqs || []}
+            onFaqsChange={(faqs) =>
+              setForm((prev) => ({ ...prev, faqs }))
+            }
+            onDirty={() => setDirty(true)}
+            showIcon={false}           
+            cardClassName="border-border/70 shadow-xs overflow-hidden mt-6"
+            headerClassName="p-6 pb-4 border-b border-border/50 flex flex-row items-center justify-between gap-4"
+            headerContentClassName=""
+            descriptionClassName="text-xs text-muted-foreground mt-1"
+            addButtonClassName="text-xs font-semibold rounded-xl border-dashed border-border hover:border-foreground text-foreground shrink-0"
+            questionLabelClassName="text-xs font-semibold text-foreground/80 mb-1.5 block"
+            answerLabelClassName="text-xs font-semibold text-foreground/80 mb-1.5 block"
+            questionPlaceholder="e.g. What are the key compliance requirements for GST registration?"
+            allowDeleteLast
+            emptyMessage={'No FAQs added yet. Click "Add FAQ" to add questions for your readers and Google Rich Snippets.'}
+          />
         </div>
 
         {/* Right rail (desktop) */}
