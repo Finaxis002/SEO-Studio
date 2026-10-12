@@ -120,6 +120,13 @@ body {
   background: hsl(var(--muted-foreground) / 0.35);
 }
 
+.category-modal-form-scrollbar {
+  scrollbar-width: none;
+}
+.category-modal-form-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 .ss-kbd {
   display: inline-flex;
   align-items: center;

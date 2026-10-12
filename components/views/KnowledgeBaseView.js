@@ -406,7 +406,10 @@ const categoriesById = useMemo(() => {
                   {categories.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       <span className="flex items-center gap-1.5 truncate">
-                        <span>{c.icon || "📄"}</span>
+                        <CategoryIcon
+                          icon={c.icon}
+                          className="h-4 w-4 shrink-0"
+                        />
                         <span>{c.name}</span>
                       </span>
                     </SelectItem>

@@ -317,12 +317,15 @@ export default function KbCategoriesView({ navigate }) {
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="flex w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] max-w-md flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>{editingCategory ? "Edit Category" : "Add New Category"}</DialogTitle>
           </DialogHeader>
 
-          <form onSubmit={handleSave} className="space-y-4 pt-2">
+          <form
+            onSubmit={handleSave}
+            className="category-modal-form-scrollbar min-h-0 min-w-0 w-full flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-1 pt-2"
+          >
           <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
                          Category Name *
@@ -385,7 +388,7 @@ export default function KbCategoriesView({ navigate }) {
               />
             </div>
 
-            <DialogFooter className="pt-2">
+            <DialogFooter className="flex-row justify-between gap-2 space-x-0 pt-2 sm:justify-between sm:space-x-0">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancel
               </Button>
