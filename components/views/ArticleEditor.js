@@ -2549,6 +2549,19 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
   const readTime = Math.max(1, Math.ceil(wordCount / 200));
   const outlineHeadings = useMemo(() => extractHeadings(form.contentHtml), [form.contentHtml]);
 
+  // Clickable Table of Contents heading jump
+  const jumpToHeading = (idx) => {
+    if (!editorRef.current) return;
+    const headings = editorRef.current.querySelectorAll("h1, h2, h3");
+    if (headings && headings[idx]) {
+      headings[idx].scrollIntoView({ behavior: "smooth", block: "center" });
+      headings[idx].classList.add("ring-2", "ring-violet-500", "rounded-md", "transition-all");
+      setTimeout(() => {
+        headings[idx].classList.remove("ring-2", "ring-violet-500", "rounded-md", "transition-all");
+      }, 1500);
+    }
+  };
+
   if (loadingArticle) {
     return (
       <div className="p-20 text-center flex items-center justify-center gap-2 text-muted-foreground">
@@ -3769,7 +3782,71 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
         {/* RIGHT COLUMN (4 cols, Sticky): Guide Inspector     */}
         {/* ================================================== */}
         <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-6">
-          {/* Card 1: Guide Details & Publishing Inspector */}
+          {/* Card 1: Live Table of Contents / Outline (Top of Sidebar for Immediate Visibility) */}
+          <Card className="border-border shadow-xs">
+            <CardHeader className="p-4 pb-3 border-b border-border/60">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <List className="w-4 h-4 text-violet-600" />
+                  Guide Table of Contents
+                </CardTitle>
+                <Badge
+                  variant="outline"
+                  className="text-[11px] font-semibold px-2 py-0.5 border-violet-200 text-violet-700 bg-violet-50 dark:bg-violet-950/40 dark:border-violet-800 dark:text-violet-300"
+                >
+                  {outlineHeadings.length}{" "}
+                  {outlineHeadings.length === 1 ? "section" : "sections"}
+                </Badge>
+              </div>
+              <CardDescription className="text-xs mt-1">
+                Live document outline. Click any heading below to jump directly to it in the editor.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-3">
+              {outlineHeadings.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border/80 bg-muted/20 p-3.5 text-center">
+                  <p className="text-xs text-muted-foreground">
+                    No headings (H1, H2, H3) detected yet. Use the editor toolbar to add headings and structure your guide.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1">
+                  {outlineHeadings.map((h, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => jumpToHeading(idx)}
+                      className={`w-full text-left rounded-lg py-1.5 px-2.5 text-xs transition-all flex items-center gap-2 hover:bg-violet-50 hover:text-violet-900 dark:hover:bg-violet-950/40 dark:hover:text-violet-200 group ${
+                        h.level === "h1"
+                          ? "font-bold text-foreground bg-muted/30"
+                          : h.level === "h2"
+                          ? "pl-4 font-semibold text-foreground/90"
+                          : "pl-7 text-muted-foreground font-normal"
+                      }`}
+                      title={`Jump to: ${h.text}`}
+                    >
+                      <span
+                        className={`text-[10px] font-mono px-1.5 py-0.2 rounded shrink-0 font-bold uppercase ${
+                          h.level === "h1"
+                            ? "bg-violet-100 text-violet-700 dark:bg-violet-900/60 dark:text-violet-300"
+                            : h.level === "h2"
+                            ? "bg-muted text-muted-foreground"
+                            : "bg-transparent text-muted-foreground/70"
+                        }`}
+                      >
+                        {h.level}
+                      </span>
+                      <span className="truncate flex-1 group-hover:underline">
+                        {h.text}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Card 2: Guide Details & Publishing Inspector (With Integrated Search Tags) */}
           <Card className="border-border shadow-xs">
             <CardHeader className="pb-3 border-b border-border/70">
               <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
@@ -3879,6 +3956,26 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                 </span>
               </div>
 
+              {/* Integrated Help Center Search Tags */}
+              <div className="space-y-1.5 pt-2 border-t border-border/60">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground font-medium flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-violet-500" />
+                    Search Tags
+                  </span>
+                  <span className="text-[10.5px] text-muted-foreground">comma-separated</span>
+                </div>
+                <Input
+                  placeholder="e.g. invoice, custom fields, company profile"
+                  value={form.searchTags}
+                  onChange={(e) => {
+                    setDirty(true);
+                    setForm({ ...form, searchTags: e.target.value });
+                  }}
+                  className="text-xs h-8 bg-muted/20"
+                />
+              </div>
+
               {/* Word Count */}
               <div className="flex items-center justify-between text-xs pt-1 border-t border-border/60">
                 <span className="text-muted-foreground font-medium">Content Length</span>
@@ -3921,67 +4018,6 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                   </div>
                 )}
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Card 2: Help Center Search Keywords */}
-          <Card className="border-border shadow-xs">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
-                <Tag className="w-4 h-4 text-violet-600" />
-                Help Center Search Tags
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Comma-separated keywords so users can easily discover this guide in the search box.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Input
-                placeholder="e.g. invoice, custom fields, company profile"
-                value={form.searchTags}
-                onChange={(e) => {
-                  setDirty(true);
-                  setForm({ ...form, searchTags: e.target.value });
-                }}
-                className="text-xs h-9"
-              />
-            </CardContent>
-          </Card>
-
-          {/* Card 3: Live Table of Contents / Outline */}
-          <Card className="border-border shadow-xs">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
-                <List className="w-4 h-4 text-violet-600" />
-                Guide Table of Contents
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Headings detected from your content for the reader's right-hand scroll-spy.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {outlineHeadings.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic py-2">
-                  No headings (H1, H2, H3) detected yet. Use the toolbar heading buttons to structure sections.
-                </p>
-              ) : (
-                <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
-                  {outlineHeadings.map((h, idx) => (
-                    <div
-                      key={idx}
-                      className={`text-xs py-1 px-2 rounded-md hover:bg-muted transition-colors truncate ${
-                        h.level === "h1"
-                          ? "font-bold text-foreground"
-                          : h.level === "h2"
-                          ? "pl-4 font-semibold text-foreground/90"
-                          : "pl-6 text-muted-foreground"
-                      }`}
-                    >
-                      {h.text}
-                    </div>
-                  ))}
-                </div>
-              )}
             </CardContent>
           </Card>
         </div>
