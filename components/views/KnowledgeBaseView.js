@@ -27,6 +27,8 @@ import {
   LayoutGrid,
   CalendarClock,
   Archive,
+  Check,
+  X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,11 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -178,17 +185,32 @@ const categoriesById = useMemo(() => {
     return { all: total, published: pub, scheduled: sch, draft: drf, archived: arc };
   }, [data?.counts, savedCounts, articles, total]);
 
-  // Available authors list from articles + team
+  // Available authors list from team (matches Blogs.js)
   const authorsList = useMemo(() => {
-    const set = new Set(["Vinimay Product Team", "Admin"]);
-    teamMembers.forEach((m) => {
-      if (m?.name) set.add(m.name);
-    });
-    articles.forEach((a) => {
-      if (a?.author) set.add(a.author);
-    });
-    return Array.from(set).sort();
-  }, [teamMembers, articles]);
+    return (teamMembers || [])
+      .map((m) => m?.name?.trim())
+      .filter(Boolean);
+  }, [teamMembers]);
+
+  // Category search filter states
+  const [catSearch, setCatSearch] = useState("");
+  const [catOpen, setCatOpen] = useState(false);
+
+  // Filtered categories for category search dropdown
+  const filteredCategories = useMemo(() => {
+    const q = catSearch.trim().toLowerCase();
+    if (!q) return categories;
+    return categories.filter((c) => (c.name || "").toLowerCase().includes(q));
+  }, [categories, catSearch]);
+
+  const activeCategory = useMemo(() => {
+    if (selectedCategory === "all") return null;
+    return (
+      categories.find(
+        (c) => c.id === selectedCategory || c.slug === selectedCategory
+      ) || null
+    );
+  }, [categories, selectedCategory]);
 
   // Check if any filter is actively applied
   const hasFilters =
@@ -204,6 +226,7 @@ const categoriesById = useMemo(() => {
     setSelectedCategory("all");
     setSelectedAuthor("all");
     setSort("newest");
+    setCatSearch("");
     setPage(1);
   };
 
@@ -382,40 +405,131 @@ const categoriesById = useMemo(() => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All authors</SelectItem>
-                  {authorsList.map((authName) => (
-                    <SelectItem key={authName} value={authName}>
-                      {authName}
+                  {authorsList.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
-              {/* Category Filter */}
-              <Select
-                value={selectedCategory}
-                onValueChange={(v) => {
-                  setSelectedCategory(v);
-                  setPage(1);
+              {/* Category Filter with Searchbar */}
+              <Popover
+                open={catOpen}
+                onOpenChange={(o) => {
+                  setCatOpen(o);
+                  if (!o) setCatSearch("");
                 }}
               >
-                <SelectTrigger className="w-[170px] h-9 bg-muted/40 text-xs">
-                  <SelectValue placeholder="All categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      <span className="flex items-center gap-1.5 truncate">
-                        <CategoryIcon
-                          icon={c.icon}
-                          className="h-4 w-4 shrink-0"
-                        />
-                        <span>{c.name}</span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    type="button"
+                    className="w-[170px] sm:w-[190px] h-9 bg-muted/40 text-xs font-normal justify-between px-3 hover:bg-accent/40"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      {activeCategory ? (
+                        <>
+                          <CategoryIcon
+                            icon={activeCategory.icon}
+                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                          />
+                          <span className="truncate">{activeCategory.name}</span>
+                        </>
+                      ) : (
+                        <span className="truncate text-foreground">All categories</span>
+                      )}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground ml-1.5 opacity-60" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="p-1.5 w-[220px] shadow-lg z-50"
+                  align="start"
+                >
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-border/60 mb-1">
+                    <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <input
+                      autoFocus
+                      type="text"
+                      value={catSearch}
+                      onChange={(e) => setCatSearch(e.target.value)}
+                      placeholder="Search category..."
+                      className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                    />
+                    {catSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setCatSearch("")}
+                        className="text-muted-foreground hover:text-foreground p-0.5"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-56 overflow-y-auto space-y-0.5 py-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategory("all");
+                        setPage(1);
+                        setCatOpen(false);
+                        setCatSearch("");
+                      }}
+                      className={
+                        "w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors text-left " +
+                        (selectedCategory === "all"
+                          ? "bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300 font-semibold"
+                          : "hover:bg-accent text-foreground")
+                      }
+                    >
+                      <span className="truncate">All categories</span>
+                      {selectedCategory === "all" && (
+                        <Check className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400 shrink-0 ml-1.5" />
+                      )}
+                    </button>
+
+                    {filteredCategories.length === 0 ? (
+                      <div className="py-3 text-center text-xs text-muted-foreground">
+                        No categories found
+                      </div>
+                    ) : (
+                      filteredCategories.map((c) => {
+                        const isSelected = selectedCategory === c.id;
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCategory(c.id);
+                              setPage(1);
+                              setCatOpen(false);
+                              setCatSearch("");
+                            }}
+                            className={
+                              "w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors text-left " +
+                              (isSelected
+                                ? "bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300 font-semibold"
+                                : "hover:bg-accent text-foreground")
+                            }
+                          >
+                            <span className="flex items-center gap-1.5 truncate">
+                              <CategoryIcon
+                                icon={c.icon}
+                                className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                              />
+                              <span className="truncate">{c.name}</span>
+                            </span>
+                            {isSelected && (
+                              <Check className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400 shrink-0 ml-1.5" />
+                            )}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
 
               {/* Sort Dropdown */}
               <Select value={sort} onValueChange={setSort}>
