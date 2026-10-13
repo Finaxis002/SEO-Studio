@@ -50,30 +50,18 @@ import { useTheme } from "next-themes";
 export default function SettingsView({
   tab: initialTab,
   user,
-  canManageSettings = true,
+  canEditSettings = false,
 }) {
   const vinimayUrl =
     process.env.NEXT_PUBLIC_VINIMAY_URL || "https://vinimay.sharda.co.in";
-  const [tab, setTab] = useState(
-    canManageSettings ? initialTab || "general" : "profile",
-  );
-  const { data: s, mutate } = useSWR(
-    canManageSettings ? "/api/settings" : null,
-    fetcher,
-  );
-  const { data: options } = useSWR(
-    canManageSettings ? "/api/settings-options" : null,
-    fetcher,
-  );
+  const [tab, setTab] = useState(initialTab || "general");
+  const { data: s, mutate } = useSWR("/api/settings", fetcher);
+  const { data: options } = useSWR("/api/settings-options", fetcher);
   const { data: contentOptions, mutate: mutateContentOptions } = useSWR(
-    canManageSettings ? "/api/content-options" : null,
+    "/api/content-options",
     fetcher,
   );
-  const [form, setForm] = useState(
-    canManageSettings
-      ? null
-      : { general: {}, seo: {}, llm: {}, publishing: {} },
-  );
+  const [form, setForm] = useState(null);
   const [newCategory, setNewCategory] = useState("");
   const [newSubcategory, setNewSubcategory] = useState("");
   const [subcategoryCategory, setSubcategoryCategory] = useState("");
@@ -101,19 +89,19 @@ export default function SettingsView({
   );
 
   useEffect(() => {
-    setTab(canManageSettings ? initialTab || "general" : "profile");
-  }, [initialTab, canManageSettings]);
+    setTab(initialTab || "general");
+  }, [initialTab]);
   useEffect(() => {
-    if (s && !form && canManageSettings)
+    if (s && !form)
       setForm({
         general: s.general || {},
         seo: s.seo || {},
         llm: s.llm || { enabled: true, includeBlogs: true, summary: "" },
         publishing: s.publishing || {},
       });
-  }, [s, canManageSettings]); // eslint-disable-line
+  }, [s]); // eslint-disable-line
 
-  if (!form && canManageSettings && tab !== "profile")
+  if (!form && tab !== "profile")
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-72" />
@@ -286,34 +274,31 @@ export default function SettingsView({
     <div className="space-y-4 animate-fade-up max-w-6xl">
       <div>
         <h1 className="text-[22px] font-bold tracking-tight">
-          {canManageSettings ? "Settings" : "Profile & Preferences"}
+          Settings
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          {canManageSettings
-            ? "Workspace configuration and your profile."
-            : "Manage your personal account details and appearance."}
+          Workspace configuration and your profile.
         </p>
       </div>
 
-      {canManageSettings && (
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="h-9 justify-start overflow-x-auto w-full bg-muted/60 p-1">
-            <TabsTrigger value="general" className="text-xs px-3 h-7">
-              General
-            </TabsTrigger>
-            <TabsTrigger value="seo" className="text-xs px-3 h-7">
-              SEO
-            </TabsTrigger>
-            <TabsTrigger value="publishing" className="text-xs px-3 h-7">
-              Publishing
-            </TabsTrigger>
-            <TabsTrigger value="profile" className="text-xs px-3 h-7">
-              Profile
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-      )}
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="h-9 justify-start overflow-x-auto w-full bg-muted/60 p-1">
+          <TabsTrigger value="general" className="text-xs px-3 h-7">
+            General
+          </TabsTrigger>
+          <TabsTrigger value="seo" className="text-xs px-3 h-7">
+            SEO
+          </TabsTrigger>
+          <TabsTrigger value="publishing" className="text-xs px-3 h-7">
+            Publishing
+          </TabsTrigger>
+          <TabsTrigger value="profile" className="text-xs px-3 h-7">
+            Profile
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
+      <fieldset disabled={!canEditSettings} className="contents">
       <Dialog open={addCategoryOpen} onOpenChange={setAddCategoryOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -1120,6 +1105,7 @@ export default function SettingsView({
           </CardContent>
         </Card>
       )}
+      </fieldset>
 
       {tab === "profile" && (
         <Card className="card-hover max-w-3xl">

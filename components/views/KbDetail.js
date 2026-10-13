@@ -584,7 +584,7 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
 
             {/* Right Column: Actions */}
             <div className="flex flex-wrap items-center gap-2 pt-1 lg:pt-0">
-              {can("blogs.edit") && (
+              {can("kb.edit") && (
                 <Button
                   size="sm"
                   onClick={() => navigate("kb-editor", { articleId: article.id })}
@@ -628,7 +628,7 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                   {/* 1. DRAFT */}
                   {article.status === "draft" && (
                     <>
-                      {can("blogs.publish") && (
+                      {can("kb.publish") && (
                         <DropdownMenuItem
                           onClick={() => handleTransition("published")}
                           disabled={togglingStatus}
@@ -638,27 +638,29 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                           Publish Live Now
                         </DropdownMenuItem>
                       )}
-                      {can("blogs.publish") && (
+                      {can("kb.schedule") && (
                         <DropdownMenuItem onClick={() => setScheduleOpen(true)} className="cursor-pointer">
                           <CalendarClock className="w-4 h-4 mr-2 text-violet-600" />
                           Schedule Guide
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem
-                        onClick={() => handleTransition("archived")}
-                        disabled={togglingStatus}
-                        className="cursor-pointer text-muted-foreground hover:text-foreground"
-                      >
-                        <Archive className="w-4 h-4 mr-2 text-amber-600" />
-                        Archive Guide
-                      </DropdownMenuItem>
+                      {can("kb.archive") && (
+                        <DropdownMenuItem
+                          onClick={() => handleTransition("archived")}
+                          disabled={togglingStatus}
+                          className="cursor-pointer text-muted-foreground hover:text-foreground"
+                        >
+                          <Archive className="w-4 h-4 mr-2 text-amber-600" />
+                          Archive Guide
+                        </DropdownMenuItem>
+                      )}
                     </>
                   )}
 
                   {/* 2. SCHEDULED */}
                   {article.status === "scheduled" && (
                     <>
-                      {can("blogs.publish") && (
+                      {can("kb.publish") && (
                         <DropdownMenuItem
                           onClick={() => handleTransition("published")}
                           disabled={togglingStatus}
@@ -668,35 +670,39 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                           Publish Live Now
                         </DropdownMenuItem>
                       )}
-                      {can("blogs.publish") && (
+                      {can("kb.schedule") && (
                         <DropdownMenuItem onClick={() => setScheduleOpen(true)} className="cursor-pointer">
                           <CalendarClock className="w-4 h-4 mr-2 text-violet-600" />
                           Reschedule Guide
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem
-                        onClick={() => handleTransition("draft", { scheduledAt: null })}
-                        disabled={togglingStatus}
-                        className="cursor-pointer"
-                      >
-                        <RotateCcw className="w-4 h-4 mr-2 text-amber-600" />
-                        Cancel Schedule (To Draft)
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => handleTransition("archived")}
-                        disabled={togglingStatus}
-                        className="cursor-pointer text-muted-foreground hover:text-foreground"
-                      >
-                        <Archive className="w-4 h-4 mr-2 text-amber-600" />
-                        Archive Guide
-                      </DropdownMenuItem>
+                      {can("kb.edit") && (
+                        <DropdownMenuItem
+                          onClick={() => handleTransition("draft", { scheduledAt: null })}
+                          disabled={togglingStatus}
+                          className="cursor-pointer"
+                        >
+                          <RotateCcw className="w-4 h-4 mr-2 text-amber-600" />
+                          Cancel Schedule (To Draft)
+                        </DropdownMenuItem>
+                      )}
+                      {can("kb.archive") && (
+                        <DropdownMenuItem
+                          onClick={() => handleTransition("archived")}
+                          disabled={togglingStatus}
+                          className="cursor-pointer text-muted-foreground hover:text-foreground"
+                        >
+                          <Archive className="w-4 h-4 mr-2 text-amber-600" />
+                          Archive Guide
+                        </DropdownMenuItem>
+                      )}
                     </>
                   )}
 
                   {/* 3. PUBLISHED (NO Schedule Guide!) */}
                   {article.status === "published" && (
                     <>
-                      {can("blogs.publish") && (
+                      {can("kb.edit") && (
                         <DropdownMenuItem
                           onClick={() => handleTransition("draft")}
                           disabled={togglingStatus}
@@ -706,29 +712,33 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                           Unpublish to Draft
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem
-                        onClick={() => handleTransition("archived")}
-                        disabled={togglingStatus}
-                        className="cursor-pointer text-muted-foreground hover:text-foreground"
-                      >
-                        <Archive className="w-4 h-4 mr-2 text-amber-600" />
-                        Archive Guide
-                      </DropdownMenuItem>
+                      {can("kb.archive") && (
+                        <DropdownMenuItem
+                          onClick={() => handleTransition("archived")}
+                          disabled={togglingStatus}
+                          className="cursor-pointer text-muted-foreground hover:text-foreground"
+                        >
+                          <Archive className="w-4 h-4 mr-2 text-amber-600" />
+                          Archive Guide
+                        </DropdownMenuItem>
+                      )}
                     </>
                   )}
 
                   {/* 4. ARCHIVED */}
                   {article.status === "archived" && (
                     <>
-                      <DropdownMenuItem
-                        onClick={() => handleTransition("draft")}
-                        disabled={togglingStatus}
-                        className="cursor-pointer"
-                      >
-                        <RotateCcw className="w-4 h-4 mr-2 text-sky-600" />
-                        Restore to Draft
-                      </DropdownMenuItem>
-                      {can("blogs.publish") && (
+                      {can("kb.edit") && (
+                        <DropdownMenuItem
+                          onClick={() => handleTransition("draft")}
+                          disabled={togglingStatus}
+                          className="cursor-pointer"
+                        >
+                          <RotateCcw className="w-4 h-4 mr-2 text-sky-600" />
+                          Restore to Draft
+                        </DropdownMenuItem>
+                      )}
+                      {can("kb.publish") && (
                         <DropdownMenuItem
                           onClick={() => handleTransition("published")}
                           disabled={togglingStatus}
@@ -741,7 +751,7 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                     </>
                   )}
 
-                  {can("blogs.delete") && (
+                  {can("kb.delete") && (
                     <DropdownMenuItem
                       onClick={() => setDeleteModalOpen(true)}
                       className="text-rose-600 dark:text-rose-400 focus:text-rose-600 focus:bg-rose-500/10 cursor-pointer"
@@ -1428,7 +1438,7 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {can("blogs.edit") && (
+                      {can("kb.edit") && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -1516,7 +1526,7 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                     This knowledge base article doesn't have an attached video walkthrough yet. Adding a YouTube tutorial helps users learn and master this feature faster.
                   </p>
                 </div>
-                {can("blogs.edit") && (
+                {can("kb.edit") && (
                   <Button
                     size="sm"
                     onClick={() => navigate("kb-editor", { articleId: article.id })}

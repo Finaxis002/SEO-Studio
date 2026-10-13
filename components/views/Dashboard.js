@@ -97,14 +97,30 @@ export default function Dashboard({ user, navigate, can }) {
   const [metrics, setMetrics] = useState(["organic", "views"]);
   const [confirm, setConfirm] = useState(null);
 
-  const { data: stats, error: statsErr } = useSWR("/api/stats", fetcher);
-  const { data: analytics } = useSWR("/api/analytics?range=" + range, fetcher);
-  const { data: top } = useSWR(
-    "/api/blogs?sort=views&limit=6&status=all",
+  const canViewAnalytics = can("analytics.view");
+  const canViewBlogs = can("blogs.view");
+  const { data: stats, error: statsErr } = useSWR(
+    canViewAnalytics ? "/api/stats" : null,
     fetcher,
   );
-  const { data: activity } = useSWR("/api/activity", fetcher);
-  const { data: issues } = useSWR("/api/seo-issues", fetcher);
+  const { data: analytics } = useSWR(
+    canViewAnalytics ? "/api/analytics?range=" + range : null,
+    fetcher,
+  );
+  const { data: top } = useSWR(
+    canViewAnalytics && canViewBlogs
+      ? "/api/blogs?sort=views&limit=6&status=all"
+      : null,
+    fetcher,
+  );
+  const { data: activity } = useSWR(
+    canViewAnalytics ? "/api/activity" : null,
+    fetcher,
+  );
+  const { data: issues } = useSWR(
+    canViewAnalytics && can("seo.issues.view") ? "/api/seo-issues" : null,
+    fetcher,
+  );
 
   const hour = new Date().getHours();
   const greet =
@@ -205,6 +221,32 @@ export default function Dashboard({ user, navigate, can }) {
       onClick: () => setConfirm({ id: b.id, title: b.title }),
     },
   ];
+
+  if (!canViewAnalytics)
+    return (
+      <EmptyState
+        icon={TrendingUp}
+        title="Dashboard analytics are unavailable"
+        description="Your role does not have permission to view analytics. Ask an administrator to enable View Analytics, or continue working with articles using the actions below."
+        action={
+          <div className="flex flex-wrap justify-center gap-2">
+            {can("blogs.create") && (
+              <Button onClick={() => navigate("editor", { id: null })}>
+                <Plus className="h-4 w-4 mr-1.5" /> Create Blog
+              </Button>
+            )}
+            {canViewBlogs && (
+              <Button
+                variant="outline"
+                onClick={() => navigate("blogs", {})}
+              >
+                View Blogs
+              </Button>
+            )}
+          </div>
+        }
+      />
+    );
 
   if (statsErr)
     return (

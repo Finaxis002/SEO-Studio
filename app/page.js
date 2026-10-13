@@ -158,14 +158,6 @@ export default function App() {
     user ? "/api/notifications" : null,
     fetcher,
   );
-  const { data: stats, mutate: statsMutate } = useSWR(
-    user ? "/api/stats" : null,
-    fetcher,
-  );
-  const { data: issuesData, mutate: issuesMutate } = useSWR(
-    user ? "/api/seo-issues" : null,
-    fetcher,
-  );
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
@@ -177,22 +169,6 @@ export default function App() {
       .finally(() => setAuthLoading(false));
     setCollapsed(localStorage.getItem("ss_collapsed") === "1");
   }, []);
-
-  // Global refresh
-  useEffect(() => {
-    const h = () => {
-      statsMutate();
-      issuesMutate();
-      notifMutate();
-      mutate(
-        (key) =>
-          typeof key === "string" &&
-          (key.startsWith("/api/blogs") || key.startsWith("/api/analytics")),
-      );
-    };
-    window.addEventListener("ss-refresh", h);
-    return () => window.removeEventListener("ss-refresh", h);
-  }, [statsMutate, issuesMutate, notifMutate]);
 
   const navigate = useCallback((name, params) => {
     const nextParams = { ...(params || {}) };
@@ -239,12 +215,38 @@ export default function App() {
     : null;
   const can = useCallback(
     (perm) => {
-      if (user?.role === "Super Admin") return true;
       const perms = role?.permissions || user?.permissions || [];
-      return Array.isArray(perms) && perms.includes(perm);
+      return (
+        Array.isArray(perms) &&
+        (perms.includes("*") || perms.includes(perm))
+      );
     },
-    [role, user?.role, user?.permissions],
+    [role, user?.permissions],
   );
+  const { data: stats, mutate: statsMutate } = useSWR(
+    user && can("analytics.view") ? "/api/stats" : null,
+    fetcher,
+  );
+  const { data: issuesData, mutate: issuesMutate } = useSWR(
+    user && can("seo.issues.view") ? "/api/seo-issues" : null,
+    fetcher,
+  );
+
+  // Global refresh
+  useEffect(() => {
+    const h = () => {
+      statsMutate();
+      issuesMutate();
+      notifMutate();
+      mutate(
+        (key) =>
+          typeof key === "string" &&
+          (key.startsWith("/api/blogs") || key.startsWith("/api/analytics")),
+      );
+    };
+    window.addEventListener("ss-refresh", h);
+    return () => window.removeEventListener("ss-refresh", h);
+  }, [statsMutate, issuesMutate, notifMutate]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -451,7 +453,13 @@ export default function App() {
           return accessDenied(
             "Your role does not have permission to manage roles.",
           );
-        return <Roles can={can} />;
+        return (
+          <Roles
+            can={can}
+            roleWeight={user?.roleWeight || 0}
+            roleName={user?.role}
+          />
+        );
       case "activity":
         if (!can("team.view"))
           return accessDenied(
@@ -459,24 +467,26 @@ export default function App() {
           );
         return <ActivityView />;
       case "settings": {
-        const hasSettingsPerm = can("settings.view");
-        const requestedTab = p.tab || (hasSettingsPerm ? "general" : "profile");
+        if (!can("settings.view") && !can("settings.edit"))
+          return accessDenied(
+            "Your role does not have permission to view settings.",
+          );
         return (
           <SettingsView
-            tab={hasSettingsPerm ? requestedTab : "profile"}
+            tab={p.tab || "general"}
             user={user}
-            canManageSettings={hasSettingsPerm}
+            canEditSettings={can("settings.edit")}
           />
         );
       }
       case "kb":
-        if (!can("kb.view") && !can("blogs.view"))
+        if (!can("kb.view"))
           return accessDenied(
             "Your role does not have permission to view Knowledge Base guides.",
           );
         return <KnowledgeBaseView navigate={navigate} can={can} />;
       case "kb-detail":
-        if (!can("kb.view") && !can("blogs.view"))
+        if (!can("kb.view"))
           return accessDenied(
             "Your role does not have permission to view this guide.",
           );
@@ -489,7 +499,7 @@ export default function App() {
           />
         );
       case "kb-categories":
-        if (!can("kb.categories") && !can("kb.view") && !can("blogs.view"))
+        if (!can("kb.categories") && !can("kb.view"))
           return accessDenied(
             "Your role does not have permission to view or manage categories.",
           );
@@ -502,7 +512,7 @@ export default function App() {
   // Full-screen Knowledge Base editor
   if (view.name === "kb-editor") {
     const isNew = !view.params?.articleId || view.params?.articleId === "new";
-    if (isNew && !can("kb.create") && !can("blogs.create")) {
+    if (isNew && !can("kb.create")) {
       return accessDenied(
         "Your role does not have permission to create Knowledge Base guides.",
       );
@@ -510,9 +520,7 @@ export default function App() {
     if (
       !isNew &&
       !can("kb.edit") &&
-      !can("kb.view") &&
-      !can("blogs.edit") &&
-      !can("blogs.view")
+      !can("kb.view")
     ) {
       return accessDenied(
         "Your role does not have permission to edit or view this guide.",
