@@ -346,17 +346,18 @@ export default function KbCategoriesView({ navigate }) {
          
       <div>
   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-    Category Icon / Emoji
+    Category Icon / Emoji *
   </label>
 
   <IconPicker
     value={form.icon}
+ required
     onChange={(icon) =>
       setForm((previous) => ({
         ...previous,
         icon,
       }))
-    }
+    }  
   />
 
   <p className="text-xs text-muted-foreground mt-2">
@@ -367,13 +368,15 @@ export default function KbCategoriesView({ navigate }) {
 
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                Short Description
+                Short Description  *
               </label>
               <Input
                 placeholder="Brief summary of what this category covers..."
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
+                required
               />
+           
             </div>
 
             <div>
