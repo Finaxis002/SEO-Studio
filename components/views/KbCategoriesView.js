@@ -326,49 +326,48 @@ export default function KbCategoriesView({ navigate }) {
             onSubmit={handleSave}
             className="category-modal-form-scrollbar min-h-0 min-w-0 w-full flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-1 pt-2"
           >
-          <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                         Category Name *
-  </label>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                Category Name <span className="text-destructive font-bold ml-0.5">*</span>
+              </label>
 
-  <Input
-    placeholder="e.g. Billing & Invoicing"
-    value={form.name}
-    onChange={(e) =>
-      setForm((previous) => ({
-        ...previous,
-        name: e.target.value,
-      }))
-    }
-    required
-  />
-</div>
+              <Input
+                placeholder="e.g. Billing & Invoicing"
+                value={form.name}
+                onChange={(e) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    name: e.target.value,
+                  }))
+                }
+                required
+              />
+            </div>
          
-      <div>
-  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-    Category Icon / Emoji *
-  </label>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                Category Icon / Emoji <span className="text-destructive font-bold ml-0.5">*</span>
+              </label>
 
-  <IconPicker
-    value={form.icon}
- required
-    onChange={(icon) =>
-      setForm((previous) => ({
-        ...previous,
-        icon,
-      }))
-    }  
-  />
+              <IconPicker
+                value={form.icon}
+                required
+                onChange={(icon) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    icon,
+                  }))
+                }  
+              />
 
-  <p className="text-xs text-muted-foreground mt-2">
-    Search and select an icon or emoji.
-  </p>
-</div>
-
+              <p className="text-xs text-muted-foreground mt-2">
+                Search and select an icon or emoji.
+              </p>
+            </div>
 
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                Short Description  *
+                Short Description <span className="text-destructive font-bold ml-0.5">*</span>
               </label>
               <Input
                 placeholder="Brief summary of what this category covers..."
@@ -376,7 +375,6 @@ export default function KbCategoriesView({ navigate }) {
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 required
               />
-           
             </div>
 
             <div>
