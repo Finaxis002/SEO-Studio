@@ -27,8 +27,9 @@ import {
 import { Labeled } from "../bits";
 import { api, fetcher, initials } from "@/lib/client";
 import { EmptyState, ConfirmDialog } from "../bits";
+import { getRoleWeight } from "@/lib/role-hierarchy";
 
-export default function Roles({ can }) {
+export default function Roles({ can, roleWeight = 0, roleName }) {
   const { data: roles, error, mutate } = useSWR("/api/roles", fetcher);
   const { data: permissionCatalog } = useSWR("/api/permissions", fetcher);
   const catalog = permissionCatalog || [];
@@ -38,7 +39,13 @@ export default function Roles({ can }) {
   const [nr, setNr] = useState({ name: "", description: "", permissions: [] });
   const [confirmDel, setConfirmDel] = useState(null);
 
-  const roleList = Array.isArray(roles) ? roles : [];
+  const roleList = Array.isArray(roles)
+    ? roles.filter(
+        (role) =>
+          roleWeight > getRoleWeight(role) ||
+          (roleName === "Super Admin" && role.name === "Super Admin"),
+      )
+    : [];
   const selected = roleList.find((r) => r.id === selectedId) || roleList[0];
 
   useEffect(() => {

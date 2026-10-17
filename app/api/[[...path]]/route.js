@@ -5,6 +5,7 @@ import path from "path";
 import sharp from "sharp";
 import { getDb, clean } from "../../../lib/db";
 import { ensureSeeded } from "../../../lib/seed";
+import { getRoleWeight } from "../../../lib/role-hierarchy";
 import {
   analyzeSeo,
   computeSeoAudit,
@@ -742,6 +743,9 @@ async function handleRoute(request, { params }) {
         );
       }
 
+      const roleDoc = member.role
+        ? await db.collection("roles").findOne({ name: member.role })
+        : null;
       const response = NextResponse.json({
         user: clean({
           id: member.id,
@@ -749,6 +753,8 @@ async function handleRoute(request, { params }) {
           email: member.email,
           role: member.role,
           status: member.status,
+          permissions: roleDoc?.permissions || [],
+          roleWeight: getRoleWeight(roleDoc),
         }),
       });
       const host = request.headers.get("host") || "";
@@ -817,6 +823,7 @@ async function handleRoute(request, { params }) {
         role: member.role,
         status: member.status,
         permissions: roleDoc?.permissions || [],
+        roleWeight: getRoleWeight(roleDoc),
       }),
     });
     meResponse.headers.set(
@@ -3180,19 +3187,22 @@ async function handleRoute(request, { params }) {
 
     // ---------- ROLES ----------
     if (route === "/roles" && method === "GET") {
-      if (
-        serverCache.roles.data &&
-        Date.now() - serverCache.roles.time < 60000
-      ) {
-        return handleCORS(NextResponse.json(serverCache.roles.data), request);
-      }
+      const actorRole = await db
+        .collection("roles")
+        .findOne({ name: user.role });
+      const actorWeight = getRoleWeight(actorRole);
       const items = await db
         .collection("roles")
         .find({})
         .sort({ isCustom: 1, name: 1 })
         .toArray();
-      const rolesResult = clean(items);
-      serverCache.roles = { data: rolesResult, time: Date.now() };
+      const rolesResult = clean(
+        items.filter(
+          (role) =>
+            actorWeight > getRoleWeight(role) ||
+            (actorRole?.name === "Super Admin" && role.id === actorRole.id),
+        ),
+      );
       return handleCORS(NextResponse.json(rolesResult));
     }
 
@@ -3500,24 +3510,36 @@ async function handleRoute(request, { params }) {
       if (!can("team.roles"))
         return forbidden("Your role cannot manage roles.");
       const body = await request.json();
-      if (!body.name)
+      const name = String(body.name || "").trim();
+      if (!name)
         return handleCORS(
           NextResponse.json(
             { error: "Role name is required" },
             { status: 400 },
           ),
         );
+      const existingRole = await db.collection("roles").findOne({
+        name: { $regex: "^" + esc(name) + "$", $options: "i" },
+      });
+      if (existingRole)
+        return handleCORS(
+          NextResponse.json(
+            { error: "A role with this name already exists." },
+            { status: 409 },
+          ),
+          request,
+        );
       const doc = {
         id: uuidv4(),
-        name: body.name,
-        slug: slugify(body.name),
+        name,
+        slug: slugify(name),
         description: body.description || "Custom role",
         isCustom: true,
         permissions: body.permissions || [],
       };
       await db.collection("roles").insertOne(doc);
       invalidateCache("roles");
-      await recordActivity("created", "role", body.name);
+      await recordActivity("created", "role", name);
       return handleCORS(NextResponse.json(clean(doc), { status: 201 }));
     }
 
@@ -3526,13 +3548,39 @@ async function handleRoute(request, { params }) {
       if (method === "PUT") {
         if (!can("team.roles"))
           return forbidden("Your role cannot manage roles.");
+        const targetRole = await db.collection("roles").findOne({ id });
+        if (!targetRole)
+          return handleCORS(
+            NextResponse.json({ error: "Role not found" }, { status: 404 }),
+            request,
+          );
+        const actorRole = await db
+          .collection("roles")
+          .findOne({ name: user.role });
+        const isSuperAdminManagingOwnRole =
+          actorRole?.name === "Super Admin" &&
+          targetRole.id === actorRole.id;
+        if (
+          getRoleWeight(actorRole) <= getRoleWeight(targetRole) &&
+          !isSuperAdminManagingOwnRole
+        )
+          return forbidden(
+            "You cannot manage a role with an equal or higher hierarchy level.",
+          );
         const body = await request.json();
+        if (body.name !== undefined && body.name !== targetRole.name)
+          return handleCORS(
+            NextResponse.json(
+              { error: "Role names cannot be changed." },
+              { status: 400 },
+            ),
+            request,
+          );
         const update = {};
         if (body.permissions !== undefined)
           update.permissions = body.permissions;
         if (body.description !== undefined)
           update.description = body.description;
-        if (body.name !== undefined) update.name = body.name;
         await db.collection("roles").updateOne({ id }, { $set: update });
         invalidateCache("roles");
         const doc = await db.collection("roles").findOne({ id });
@@ -3543,6 +3591,18 @@ async function handleRoute(request, { params }) {
         if (!can("team.roles"))
           return forbidden("Your role cannot manage roles.");
         const doc = await db.collection("roles").findOne({ id });
+        if (!doc)
+          return handleCORS(
+            NextResponse.json({ error: "Role not found" }, { status: 404 }),
+            request,
+          );
+        const actorRole = await db
+          .collection("roles")
+          .findOne({ name: user.role });
+        if (getRoleWeight(actorRole) <= getRoleWeight(doc))
+          return forbidden(
+            "You cannot manage a role with an equal or higher hierarchy level.",
+          );
         if (doc && !doc.isCustom)
           return handleCORS(
             NextResponse.json(

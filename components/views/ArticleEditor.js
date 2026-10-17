@@ -1154,9 +1154,9 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
   const isEdit = !!(currentId || idRef.current);
   const isNew = !isEdit;
 
-  const canPublish = can ? can("kb.publish") || can("blogs.publish") : true;
-  const canSchedule = can ? can("kb.schedule") || can("blogs.schedule") : true;
-  const canDelete = can ? can("kb.delete") || can("blogs.delete") : true;
+  const canPublish = can ? can("kb.publish") : true;
+  const canSchedule = can ? can("kb.schedule") : true;
+  const canDelete = can ? can("kb.delete") : true;
 
   // SWR: Fetch Article Data (if editing)
   const { data: articleData, isLoading: loadingArticle } = useSWR(
@@ -3955,7 +3955,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                       <SelectItem value="draft">Draft</SelectItem>
                       {canSchedule && <SelectItem value="scheduled">Scheduled</SelectItem>}
                       {canPublish && <SelectItem value="published">Published</SelectItem>}
-                      {(canPublish || (can && (can("kb.archive") || can("blogs.archive")))) && (
+                      {(canPublish || (can && can("kb.archive"))) && (
                         <SelectItem value="archived">Archived</SelectItem>
                       )}
                     </SelectContent>

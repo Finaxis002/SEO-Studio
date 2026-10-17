@@ -325,7 +325,7 @@ const categoriesById = useMemo(() => {
         </div>
 
         <div className="flex items-center gap-2">
-          {(can("kb.categories") || can("settings.edit") || can("blogs.edit")) && (
+          {can("kb.categories") && (
             <Button
               variant="outline"
               size="sm"
@@ -337,7 +337,7 @@ const categoriesById = useMemo(() => {
             </Button>
           )}
 
-          {(can("kb.create") || can("blogs.create")) && (
+          {can("kb.create") && (
             <Button
               onClick={() => navigate("kb-editor", { articleId: "new" })}
               className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white shadow-lg shadow-violet-500/25 text-xs font-semibold"
@@ -584,7 +584,7 @@ const categoriesById = useMemo(() => {
                 : "Create your first customer tutorial to empower Vinimay users."
             }
             action={
-              !hasFilters && can("blogs.create") ? (
+              !hasFilters && can("kb.create") ? (
                 <Button
                   onClick={() => navigate("kb-editor", { articleId: "new" })}
                   className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-600 hover:to-indigo-500 text-white"
@@ -655,7 +655,7 @@ const categoriesById = useMemo(() => {
                                 of {maxInCat}
                               </span>
                             </span>
-                            {(can("kb.edit") || can("blogs.edit")) && (
+                            {can("kb.edit") && (
                               <div className="flex flex-col">
                                 <button
                                   type="button"
@@ -835,7 +835,7 @@ const categoriesById = useMemo(() => {
                                 <Eye className="w-4 h-4 mr-2" /> View in Studio
                               </DropdownMenuItem>
 
-                              {(can("kb.edit") || can("blogs.edit")) && (
+                              {can("kb.edit") && (
                                 <DropdownMenuItem
                                   onClick={() => navigate("kb-editor", { articleId: art.id })}
                                   className="cursor-pointer"
@@ -874,7 +874,7 @@ const categoriesById = useMemo(() => {
                               {/* 1. DRAFT */}
                               {art.status === "draft" && (
                                 <>
-                                  {(can("kb.publish") || can("blogs.publish")) && (
+                                  {can("kb.publish") && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "published")}
                                       className="cursor-pointer"
@@ -883,7 +883,7 @@ const categoriesById = useMemo(() => {
                                       Publish Live Now
                                     </DropdownMenuItem>
                                   )}
-                                  {(can("kb.schedule") || can("blogs.schedule")) && (
+                                  {can("kb.schedule") && (
                                     <DropdownMenuItem
                                       onClick={() => setSchedulingGuide(art)}
                                       className="cursor-pointer"
@@ -892,7 +892,7 @@ const categoriesById = useMemo(() => {
                                       Schedule Guide
                                     </DropdownMenuItem>
                                   )}
-                                  {(can("kb.archive") || can("blogs.archive")) && (
+                                  {can("kb.archive") && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "archived")}
                                       className="cursor-pointer text-muted-foreground hover:text-foreground"
@@ -907,7 +907,7 @@ const categoriesById = useMemo(() => {
                               {/* 2. SCHEDULED */}
                               {art.status === "scheduled" && (
                                 <>
-                                  {(can("kb.publish") || can("blogs.publish")) && (
+                                  {can("kb.publish") && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "published")}
                                       className="cursor-pointer"
@@ -916,7 +916,7 @@ const categoriesById = useMemo(() => {
                                       Publish Live Now
                                     </DropdownMenuItem>
                                   )}
-                                  {(can("kb.schedule") || can("blogs.schedule")) && (
+                                  {can("kb.schedule") && (
                                     <DropdownMenuItem
                                       onClick={() => setSchedulingGuide(art)}
                                       className="cursor-pointer"
@@ -925,7 +925,7 @@ const categoriesById = useMemo(() => {
                                       Reschedule Guide
                                     </DropdownMenuItem>
                                   )}
-                                  {(can("kb.schedule") || can("blogs.schedule")) && (
+                                  {can("kb.edit") && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "draft", { scheduledAt: null })}
                                       className="cursor-pointer"
@@ -934,7 +934,7 @@ const categoriesById = useMemo(() => {
                                       Cancel Schedule (To Draft)
                                     </DropdownMenuItem>
                                   )}
-                                  {(can("kb.archive") || can("blogs.archive")) && (
+                                  {can("kb.archive") && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "archived")}
                                       className="cursor-pointer text-muted-foreground hover:text-foreground"
@@ -949,7 +949,7 @@ const categoriesById = useMemo(() => {
                               {/* 3. PUBLISHED (No Schedule Guide!) */}
                               {art.status === "published" && (
                                 <>
-                                  {(can("kb.publish") || can("blogs.publish")) && (
+                                  {can("kb.edit") && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "draft")}
                                       className="cursor-pointer"
@@ -958,7 +958,7 @@ const categoriesById = useMemo(() => {
                                       Unpublish to Draft
                                     </DropdownMenuItem>
                                   )}
-                                  {(can("kb.archive") || can("blogs.archive")) && (
+                                  {can("kb.archive") && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "archived")}
                                       className="cursor-pointer text-muted-foreground hover:text-foreground"
@@ -973,7 +973,7 @@ const categoriesById = useMemo(() => {
                               {/* 4. ARCHIVED */}
                               {art.status === "archived" && (
                                 <>
-                                  {(can("kb.edit") || can("blogs.edit")) && (
+                                  {can("kb.edit") && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "draft")}
                                       className="cursor-pointer"
@@ -982,7 +982,7 @@ const categoriesById = useMemo(() => {
                                       Restore to Draft
                                     </DropdownMenuItem>
                                   )}
-                                  {(can("kb.publish") || can("blogs.publish")) && (
+                                  {can("kb.publish") && (
                                     <DropdownMenuItem
                                       onClick={() => handleTransition(art, "published")}
                                       className="cursor-pointer"
@@ -995,7 +995,7 @@ const categoriesById = useMemo(() => {
                               )}
 
                               {/* Delete Guide */}
-                              {(can("kb.delete") || can("blogs.delete")) && (
+                              {can("kb.delete") && (
                                 <DropdownMenuItem
                                   className="text-rose-600 dark:text-rose-400 focus:text-rose-600 dark:focus:text-rose-400 focus:bg-rose-500/10 cursor-pointer"
                                   onClick={() => {
