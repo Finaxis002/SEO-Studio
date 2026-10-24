@@ -287,8 +287,8 @@ export default function AnalyticsView({ initialTab, navigate }) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2.5">
-                {data.countries.map((c) => (
-                  <div key={c.name}>
+                {data.countries.map((c, i) => (
+                  <div key={c.name || i}>
                     <div className="flex items-center justify-between text-[12.5px] mb-1">
                       <span>{c.name}</span>
                       <span className="text-muted-foreground tabular-nums">
@@ -348,9 +348,9 @@ export default function AnalyticsView({ initialTab, navigate }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.topPages.map((p) => (
+                    {data.topPages.map((p, i) => (
                       <tr
-                        key={p.id}
+                        key={p.id || p.slug || p.title || i}
                         className="border-b border-border/60 last:border-0"
                       >
                         <td className="px-4 py-2.5 font-medium truncate max-w-[280px]">
@@ -394,9 +394,9 @@ export default function AnalyticsView({ initialTab, navigate }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.topKeywords.map((k) => (
+                    {data.topKeywords.map((k, i) => (
                       <tr
-                        key={k.keyword}
+                        key={k.keyword || i}
                         className="border-b border-border/60 last:border-0"
                       >
                         <td className="px-4 py-2.5 font-medium truncate max-w-[220px]">
@@ -688,9 +688,9 @@ export default function AnalyticsView({ initialTab, navigate }) {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/60">
-                          {paginated.map((item) => (
+                          {paginated.map((item, i) => (
                             <tr
-                              key={item.id}
+                              key={item.id || item.slug || i}
                               className="hover:bg-accent/40 transition-colors"
                             >
                               <td className="px-4 py-3">

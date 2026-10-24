@@ -65,6 +65,8 @@ import {
   Pagination,
   SearchableSelect,
 } from "../bits";
+import CountrySelector, { CountryFlag } from "./CountrySelector";
+import { getCountry } from "@/lib/countries";
 
 const TABS = [
   { v: "all", l: "All" },
@@ -81,6 +83,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
   const [status, setStatus] = useState(statusFilter || "all");
   const [author, setAuthor] = useState("all");
   const [category, setCategory] = useState("all");
+  const [country, setCountry] = useState("all");
   const [band, setBand] = useState("all");
   const [sort, setSort] = useState("newest");
   const [page, setPage] = useState(1);
@@ -100,12 +103,13 @@ export default function Blogs({ statusFilter, navigate, can }) {
     if (status !== "all") p.set("status", status);
     if (author !== "all") p.set("author", author);
     if (category !== "all") p.set("category", category);
+    if (country !== "all") p.set("country", country);
     if (band !== "all") p.set("seoBand", band);
     p.set("sort", sort);
     p.set("page", String(page));
     p.set("limit", String(limit));
     return "/api/blogs?" + p.toString();
-  }, [q, status, author, category, band, sort, page, limit]);
+  }, [q, status, author, category, country, band, sort, page, limit]);
 
   const { data, error, mutate } = useSWR(query, fetcher, {
     keepPreviousData: true,
@@ -145,13 +149,14 @@ export default function Blogs({ statusFilter, navigate, can }) {
       if (status !== "all") p.set("status", status);
       if (author !== "all") p.set("author", author);
       if (category !== "all") p.set("category", category);
+      if (country !== "all") p.set("country", country);
       if (band !== "all") p.set("seoBand", band);
       p.set("sort", sort);
       p.set("page", String(page + 1));
       p.set("limit", String(limit));
       preload("/api/blogs?" + p.toString(), fetcher);
     }
-  }, [data?.pages, page, q, status, author, category, band, sort, limit]);
+  }, [data?.pages, page, q, status, author, category, country, band, sort, limit]);
 
   const refresh = () => {
     mutate();
@@ -409,6 +414,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
     status !== (statusFilter || "all") ||
     author !== "all" ||
     category !== "all" ||
+    country !== "all" ||
     band !== "all";
 
   return (
@@ -514,6 +520,17 @@ export default function Blogs({ statusFilter, navigate, can }) {
                   emptyText="No categories found"
                 />
               </div>
+              <div className="w-[170px]">
+                <CountrySelector
+                  isFilter
+                  value={country}
+                  onChange={(code) => {
+                    setCountry(code || "all");
+                    setPage(1);
+                  }}
+                  buttonClassName="bg-muted/40 h-9 w-full"
+                />
+              </div>
               <Select
                 value={band}
                 onValueChange={(v) => {
@@ -554,6 +571,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
                     setStatus(statusFilter || "all");
                     setAuthor("all");
                     setCategory("all");
+                    setCountry("all");
                     setBand("all");
                     setPage(1);
                   }}
@@ -669,7 +687,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
                                 )}
                             </div>
                             <p className="text-[11.5px] text-muted-foreground truncate max-w-[280px]">
-                              /blogs/{b.slug}
+                              {b.country && b.country !== "global" ? `/${b.country}/blogs/` : "/blogs/"}{b.slug}
                             </p>
                           </div>
                         </div>
@@ -687,12 +705,27 @@ export default function Blogs({ statusFilter, navigate, can }) {
                         </div>
                       </td>
                       <td className="px-3 py-3 hidden xl:table-cell">
-                        <Badge
-                          variant="outline"
-                          className="text-[11px] font-normal"
-                        >
-                          {b.category || "—"}
-                        </Badge>
+                        <div className="flex flex-col gap-1 items-start">
+                          <Badge
+                            variant="outline"
+                            className="text-[11px] font-normal"
+                          >
+                            {b.category || "—"}
+                          </Badge>
+                          {(() => {
+                            const c = getCountry(b.country);
+                            if (c.code === "global") return null;
+                            return (
+                              <span
+                                className="inline-flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60"
+                                title={c.name}
+                              >
+                                <CountryFlag code={c.code} size={14} />
+                                <span>{c.code.toUpperCase()}</span>
+                              </span>
+                            );
+                          })()}
+                        </div>
                       </td>
                       <td className="px-3 py-3 hidden md:table-cell text-[13px]">
                         {b.status === "scheduled" ? (

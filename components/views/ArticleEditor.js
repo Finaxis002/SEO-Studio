@@ -60,6 +60,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { ScheduleDialog, StatusBadge, Labeled } from "../bits";
+import CountrySelector from "./CountrySelector";
 
 import {
   Popover,
@@ -1389,6 +1390,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
     categoryId: "",
     categoryName: "",
     categorySlug: "",
+    country: "global",
     author: user?.name || "",
     overview: "",
     prerequisites: [],
@@ -1463,6 +1465,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
         categoryId: art.categoryId || "",
         categoryName: art.categoryName || "",
         categorySlug: art.categorySlug || "",
+        country: art.country || "global",
         author: resolvedAuthor,
         overview: art.overview || "",
         prerequisites: loadedPrereqs,
@@ -2370,6 +2373,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
       ...form,
       title: resolvedTitle,
       slug: resolvedSlug,
+      country: (form.country || "global").toLowerCase().trim(),
       videoUrl: autoVideoUrl,
       contentHtml: currentHtml,
       overview: autoOverview,
@@ -2848,8 +2852,8 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                 />
               </Labeled>
 
-              {/* Category and Author Row (Exact BlogEditor UI match) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              {/* Category, Author, and Country Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
                 <Labeled label="Category" required>
                   <Popover
                     open={catOpen}
@@ -2963,6 +2967,16 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                     </SelectContent>
                   </Select>
                 </Labeled>
+
+                <Labeled label="Select Country">
+                  <CountrySelector
+                    value={form.country || "global"}
+                    onChange={(code) => {
+                      setDirty(true);
+                      setForm((prev) => ({ ...prev, country: code }));
+                    }}
+                  />
+                </Labeled>
               </div>
 
               {/* Live URL Slug Bar with Realtime Duplicate Detection */}
@@ -2993,7 +3007,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
                   }`}
                 >
                   <span className="font-mono text-muted-foreground/80 shrink-0 select-none">
-                    vinimay.in/knowledge-base/{currentCatSlug}/
+                    vinimay.in{form.country && form.country !== "global" && form.country !== "in" ? `/${form.country}` : ""}/knowledge-base/{currentCatSlug}/
                   </span>
                   <input
                     type="text"

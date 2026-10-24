@@ -80,6 +80,8 @@ import {
   SkeletonTable,
   ScheduleDialog,
 } from "../bits";
+import CountrySelector, { CountryFlag } from "./CountrySelector";
+import { getCountry } from "@/lib/countries";
 
 const STATUS_TABS = [
   { v: "all", l: "All" },
@@ -94,6 +96,7 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
   const [selectedStatus, setSelectedStatus] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedAuthor, setSelectedAuthor] = useState("all");
+  const [selectedCountry, setSelectedCountry] = useState("all");
   const [sort, setSort] = useState("newest");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
@@ -105,7 +108,7 @@ export default function KnowledgeBaseView({ navigate, can = () => true }) {
   // Reset page when search or filters change
   useEffect(() => {
     setPage(1);
-  }, [search, selectedStatus, selectedCategory, selectedAuthor, sort]);
+  }, [search, selectedStatus, selectedCategory, selectedAuthor, selectedCountry, sort]);
 
   // Fetch categories for filter dropdown
 
@@ -140,11 +143,12 @@ const categoriesById = useMemo(() => {
     if (selectedStatus !== "all") p.set("status", selectedStatus);
     if (selectedCategory !== "all") p.set("categoryId", selectedCategory);
     if (selectedAuthor !== "all") p.set("author", selectedAuthor);
+    if (selectedCountry !== "all") p.set("country", selectedCountry);
     p.set("sort", sort);
     p.set("page", String(page));
     p.set("limit", String(limit));
     return `/api/kb/articles?${p.toString()}`;
-  }, [search, selectedStatus, selectedCategory, selectedAuthor, sort, page, limit]);
+  }, [search, selectedStatus, selectedCategory, selectedAuthor, selectedCountry, sort, page, limit]);
 
   const { data, error, mutate, isLoading } = useSWR(articlesUrl, fetcher, {
     keepPreviousData: true,
@@ -218,6 +222,7 @@ const categoriesById = useMemo(() => {
     selectedStatus !== "all" ||
     selectedCategory !== "all" ||
     selectedAuthor !== "all" ||
+    selectedCountry !== "all" ||
     sort !== "newest";
 
   const resetFilters = () => {
@@ -225,6 +230,7 @@ const categoriesById = useMemo(() => {
     setSelectedStatus("all");
     setSelectedCategory("all");
     setSelectedAuthor("all");
+    setSelectedCountry("all");
     setSort("newest");
     setCatSearch("");
     setPage(1);
@@ -253,7 +259,8 @@ const categoriesById = useMemo(() => {
 
   const copyPublicLink = (article) => {
     const vinimayUrl = process.env.NEXT_PUBLIC_VINIMAY_URL || "https://vinimay.sharda.co.in";
-    const fullUrl = `${vinimayUrl}/knowledge-base/${article.categorySlug}/${article.slug}`;
+    const countryPrefix = article.country && article.country !== "global" && article.country !== "in" ? `/${article.country}` : "";
+    const fullUrl = `${vinimayUrl}${countryPrefix}/knowledge-base/${article.categorySlug || "guide"}/${article.slug}`;
     navigator.clipboard.writeText(fullUrl);
     toast.success("Public tutorial link copied to clipboard!");
   };
@@ -531,6 +538,19 @@ const categoriesById = useMemo(() => {
                 </PopoverContent>
               </Popover>
 
+              {/* Country Filter */}
+              <div className="w-[170px]">
+                <CountrySelector
+                  isFilter
+                  value={selectedCountry}
+                  onChange={(code) => {
+                    setSelectedCountry(code || "all");
+                    setPage(1);
+                  }}
+                  buttonClassName="bg-muted/40 h-9 w-full text-xs"
+                />
+              </div>
+
               {/* Sort Dropdown */}
               <Select value={sort} onValueChange={setSort}>
                 <SelectTrigger className="w-[160px] h-9 bg-muted/40 text-xs">
@@ -687,36 +707,46 @@ const categoriesById = useMemo(() => {
                               {art.title}
                             </p>
                             <p className="text-[11.5px] text-muted-foreground truncate max-w-[340px] font-mono mt-0.5">
-                              /{art.categorySlug || "guide"}/{art.slug}
+                              {art.country && art.country !== "global" && art.country !== "in" ? `/${art.country}` : ""}/{art.categorySlug || "guide"}/{art.slug}
                             </p>
                           </div>
                         </td>
 
-                        
-                                                          
-                               {/* 3. Category */}
-                                <td className="px-3 py-3 hidden lg:table-cell">
-                      {(() => {
-                           const category =
-                               categoriesById[art.categoryId] ||
-                           categoriesById[art.categorySlug];
+                        {/* 3. Category */}
+                        <td className="px-3 py-3 hidden lg:table-cell">
+                          {(() => {
+                            const category =
+                              categoriesById[art.categoryId] ||
+                              categoriesById[art.categorySlug];
+                            const c = getCountry(art.country);
 
-                                        return (
-                                            <Badge
-                                            variant="outline"
-                                        className="inline-flex items-center gap-1.5 bg-muted/30 text-[11px] font-normal"
-                                           >
-                                              <CategoryIcon
-                                           icon={category?.icon}
-                                         className="h-3.5 w-3.5 shrink-0"
-                                                   />
-                                                        <span>
-                                                  {art.categoryName || category?.name || "General"}
-                                                     </span>
-                                                    </Badge>
-                                                          );
-                                                              })()}
-                                                  </td>
+                            return (
+                              <div className="flex flex-col gap-1 items-start">
+                                <Badge
+                                  variant="outline"
+                                  className="inline-flex items-center gap-1.5 bg-muted/30 text-[11px] font-normal"
+                                >
+                                  <CategoryIcon
+                                    icon={category?.icon}
+                                    className="h-3.5 w-3.5 shrink-0"
+                                  />
+                                  <span>
+                                    {art.categoryName || category?.name || "General"}
+                                  </span>
+                                </Badge>
+                                {c.code !== "global" && (
+                                  <span
+                                    className="inline-flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60"
+                                    title={c.name}
+                                  >
+                                    <CountryFlag code={c.code} size={14} />
+                                    <span>{c.code.toUpperCase()}</span>
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
 
 
                         {/* 4. Date & Updated */}
