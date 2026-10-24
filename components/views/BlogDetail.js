@@ -54,6 +54,8 @@ import {
   getVinimayUrl,
   getImageThumbnailUrl,
 } from "@/lib/client";
+import { getCountry } from "@/lib/countries";
+import { CountryFlag } from "./CountrySelector";
 import { analyzeSeo } from "@/lib/seo";
 import {
   StatusBadge,
@@ -66,6 +68,18 @@ import {
   ScheduleDialog,
 } from "../bits";
 import { Donut } from "../charts";
+
+const ALL_BLOG_LANGUAGES = [
+  { code: "en", label: "English", sub: "Default" },
+  { code: "ar", label: "العربية", sub: "Arabic" },
+  { code: "hi", label: "हिंदी", sub: "Hindi" },
+  { code: "mr", label: "मराठी", sub: "Marathi" },
+  { code: "gu", label: "ગુજરાતી", sub: "Gujarati" },
+  { code: "ta", label: "தமிழ்", sub: "Tamil" },
+  { code: "te", label: "తెలుగు", sub: "Telugu" },
+  { code: "kn", label: "ಕನ್ನಡ", sub: "Kannada" },
+  { code: "bn", label: "বাংলা", sub: "Bengali" },
+];
 
 export default function BlogDetail({ blogId, returnView, navigate, can }) {
   const [activeTab, setActiveTab] = useState("content");
@@ -96,6 +110,20 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewLang, setPreviewLang] = useState("en");
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
+
+  const countryCode = (b?.country || "").toLowerCase().trim();
+  const isUaeOrSa = countryCode === "ae" || countryCode === "uae" || countryCode === "sa";
+  const isIndiaOrGlobal = countryCode === "in" || countryCode === "india" || countryCode === "global" || !countryCode;
+
+  const relevantBlogLanguages = useMemo(() => {
+    if (isUaeOrSa) {
+      return ALL_BLOG_LANGUAGES.filter((l) => l.code === "en" || l.code === "ar");
+    }
+    if (isIndiaOrGlobal) {
+      return ALL_BLOG_LANGUAGES.filter((l) => l.code !== "ar");
+    }
+    return ALL_BLOG_LANGUAGES.filter((l) => l.code === "en");
+  }, [isUaeOrSa, isIndiaOrGlobal]);
 
   const displayFaqs = useMemo(() => {
     if (previewLang !== "en" && b?.translations?.[previewLang]?.faqs?.length) {
@@ -253,6 +281,19 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
               <Badge variant="outline" className="text-[11px] font-normal">
                 {b.category}
               </Badge>
+              {(() => {
+                const c = getCountry(b.country || "global");
+                return (
+                  <Badge
+                    variant="outline"
+                    className="text-[11px] font-medium gap-1.5 bg-muted/60 text-foreground border-border/80"
+                    title={`Target Country: ${c.name}`}
+                  >
+                    <CountryFlag code={c.code} size={15} />
+                    <span>{c.code === "global" ? "Global" : c.name}</span>
+                  </Badge>
+                );
+              })()}
               {b.translations && Object.keys(b.translations).length > 0 && (
                 <Badge
                   variant="outline"
@@ -461,7 +502,7 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
                               label: "View on Vinimay ↗",
                               onClick: () =>
                                 window.open(
-                                  getVinimayBlogUrl(b.slug),
+                                  getVinimayBlogUrl(b.slug, null, b.country),
                                   "_blank",
                                 ),
                             },
@@ -493,7 +534,7 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
                   variant="outline"
                   className="border-emerald-500/40 text-emerald-700 bg-emerald-50/70 hover:bg-emerald-100 hover:text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 gap-1.5 font-medium"
                   onClick={() =>
-                    window.open(getVinimayBlogUrl(b.slug), "_blank")
+                    window.open(getVinimayBlogUrl(b.slug, null, b.country), "_blank")
                   }
                   title="Open live blog on Vinimay website"
                 >
@@ -522,7 +563,7 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
                   {b.status === "published" && b.slug && (
                     <DropdownMenuItem
                       onClick={() =>
-                        window.open(getVinimayBlogUrl(b.slug), "_blank")
+                        window.open(getVinimayBlogUrl(b.slug, null, b.country), "_blank")
                       }
                     >
                       <ExternalLink className="h-4 w-4 mr-2 text-emerald-600" />
@@ -786,16 +827,7 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
                   <span>
                     Preview:{" "}
                     <span className="text-violet-600 font-bold">
-                      {[
-                        { code: "en", label: "English" },
-                        { code: "hi", label: "हिंदी" },
-                        { code: "mr", label: "मराठी" },
-                        { code: "gu", label: "ગુજરાતી" },
-                        { code: "ta", label: "தமிழ்" },
-                        { code: "te", label: "తెలుగు" },
-                        { code: "kn", label: "ಕನ್ನಡ" },
-                        { code: "bn", label: "বাংলা" },
-                      ].find((l) => l.code === previewLang)?.label || "English"}
+                      {relevantBlogLanguages.find((l) => l.code === previewLang)?.label || "English"}
                     </span>
                   </span>
                   <ChevronDown className="h-3 w-3 text-muted-foreground" />
@@ -808,16 +840,7 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
                 <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground border-b border-border/50 mb-1">
                   Select Preview Language
                 </div>
-                {[
-                  { code: "en", label: "English", sub: "Default" },
-                  { code: "hi", label: "हिंदी", sub: "Hindi" },
-                  { code: "mr", label: "मराठी", sub: "Marathi" },
-                  { code: "gu", label: "ગુજરાતી", sub: "Gujarati" },
-                  { code: "ta", label: "தமிழ்", sub: "Tamil" },
-                  { code: "te", label: "తెలుగు", sub: "Telugu" },
-                  { code: "kn", label: "ಕನ್ನಡ", sub: "Kannada" },
-                  { code: "bn", label: "বাংলা", sub: "Bengali" },
-                ]
+                {relevantBlogLanguages
                   .filter((l) => l.code === "en" || b.translations?.[l.code])
                   .map((l) => {
                     const isActive = previewLang === l.code;
@@ -963,10 +986,22 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
               </CardHeader>
               <CardContent className="space-y-3 text-[13px]">
                 {[
+                  [
+                    "Target Market",
+                    (() => {
+                      const c = getCountry(b.country || "global");
+                      return `${c.flag} ${c.name} (${c.taxLabel || "General"})`;
+                    })(),
+                  ],
                   ["SEO title", b.seo?.metaTitle || b.title],
                   ["Meta description", b.seo?.metaDescription || "—"],
                   ["Focus keyword", b.seo?.focusKeyword || "—"],
-                  ["Slug", "/blogs/" + b.slug],
+                  [
+                    "Slug",
+                    (b.country && b.country !== "global" && b.country !== "in"
+                      ? `/${b.country}/blogs/`
+                      : "/blogs/") + b.slug,
+                  ],
                   ["Canonical", b.seo?.canonical || "—"],
                   [
                     "Robots",

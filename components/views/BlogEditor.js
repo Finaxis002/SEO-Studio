@@ -107,6 +107,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import FaqEditorCard from "../ui/FaqEditorCard";
+import CountrySelector from "./CountrySelector";
 import {
   api,
   fetcher,
@@ -246,6 +247,7 @@ const emptyForm = () => ({
   slugEdited: false,
   category: "",
   subcategory: "",
+  country: "global",
   author: "",
   tags: [],
   featuredImage: { url: "", alt: "", title: "", caption: "" },
@@ -526,6 +528,7 @@ export default function BlogEditor({
         slugEdited: true,
         category: blogDoc.category || "",
         subcategory: blogDoc.subcategory || "",
+        country: blogDoc.country || "global",
         author: blogDoc.author || "",
         tags: blogDoc.tags || [],
         featuredImage: blogDoc.featuredImage || {
@@ -1341,6 +1344,7 @@ export default function BlogEditor({
         slug: form.slug || slugify(form.title),
         category: form.category || "General",
         subcategory: form.subcategory,
+        country: (form.country || "global").toLowerCase().trim(),
         author: form.author || user?.name,
         tags: form.tags,
         featuredImage: form.featuredImage,
@@ -1367,6 +1371,7 @@ export default function BlogEditor({
         setForm((f) => ({
           ...f,
           slug: savedBlog.slug,
+          country: savedBlog.country || f.country,
           seo: { ...f.seo, score: savedBlog.seo?.score ?? analysis.score },
         }));
       } else {
@@ -1479,7 +1484,7 @@ export default function BlogEditor({
       window.dispatchEvent(new Event("ss-refresh"));
       if (to === "published") {
         const publishedSlug = b.slug || form.slug;
-        const liveUrl = getVinimayBlogUrl(publishedSlug);
+        const liveUrl = getVinimayBlogUrl(publishedSlug, null, b.country || form.country);
         toast.success(
           form.status === "published"
             ? "Blog updated & live changes saved! 🎉"
@@ -2345,6 +2350,7 @@ export default function BlogEditor({
           contentType: form.brief.contentType,
           wordCount: form.brief.wordCount,
           intent: form.brief.intent,
+          country: form.country || "global",
         },
       });
       setOutline(o);
@@ -2398,6 +2404,7 @@ export default function BlogEditor({
           title: form.title,
           keyword: form.seo.focusKeyword || form.brief.targetKeyword,
           contentHtml: form.contentHtml,
+          country: form.country || "global",
         },
       });
       if (res.metaTitle || res.metaDescription) {
@@ -2697,7 +2704,7 @@ export default function BlogEditor({
                 size="sm"
                 className="h-9 border-emerald-500/50 text-emerald-700 bg-emerald-50/70 hover:bg-emerald-100 hover:text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 gap-1.5 font-medium shadow-xs"
                 onClick={() => {
-                  window.open(getVinimayBlogUrl(form.slug), "_blank");
+                  window.open(getVinimayBlogUrl(form.slug, null, form.country), "_blank");
                 }}
                 title="View live blog on Vinimay in a new tab"
               >
@@ -2995,7 +3002,7 @@ export default function BlogEditor({
                 <Labeled label="URL slug">
                   <div className="flex items-center rounded-md border border-input bg-muted/30 shadow-sm focus-within:ring-2 focus-within:ring-ring/30">
                     <span className="pl-3 text-[13px] text-muted-foreground select-none">
-                      /blogs/
+                      {form.country && form.country !== "global" && form.country !== "in" ? `/${form.country}/blogs/` : "/blogs/"}
                     </span>
                     <Input
                       id="f-slug"
@@ -3020,6 +3027,15 @@ export default function BlogEditor({
                       </p>
                     )}
                 </Labeled>
+                <Labeled label="Select Country">
+                  <CountrySelector
+                    value={form.country || "global"}
+                    onChange={(code) => up({ country: code })}
+                  />
+                </Labeled>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Labeled label="Author" required>
                   <Select
                     value={form.author || ""}
@@ -4748,17 +4764,17 @@ export default function BlogEditor({
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-[14px] font-bold tracking-tight text-foreground leading-none">
+                    <DialogTitle className="text-[14px] font-bold tracking-tight text-foreground leading-none">
                       AI SEO Suggestions
-                    </h2>
+                    </DialogTitle>
                     <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-300 bg-violet-100 dark:bg-violet-950 px-2 py-0.5 rounded-full">
                       Preview &amp; Select
                     </span>
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">
+                  <DialogDescription className="text-[11px] text-muted-foreground mt-1">
                     Choose suggestions to include or skip. SEO score updates
                     live.
-                  </p>
+                  </DialogDescription>
                 </div>
               </div>
 

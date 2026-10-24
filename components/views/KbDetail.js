@@ -51,13 +51,17 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { api, fetcher, fmtDate, timeAgo, initials, getVinimayUrl } from "@/lib/client";
+import { getCountry } from "@/lib/countries";
+import { CountryFlag } from "./CountrySelector";
 import { ScheduleDialog } from "../bits";
 import CategoryIcon from "./CategoryIcon";
 
 const SUPPORTED_LANGUAGES = [
   { code: "en", label: "English", flag: "🇬🇧" },
+  { code: "ar", label: "العربية (Arabic)", flag: "🇦🇪" },
   { code: "hi", label: "हिन्दी (Hindi)", flag: "🇮🇳" },
   { code: "mr", label: "मराठी (Marathi)", flag: "🇮🇳" },
   { code: "gu", label: "ગુજરાતી (Gujarati)", flag: "🇮🇳" },
@@ -110,6 +114,20 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
 
   // Translations
   const translations = article?.translations || {};
+  const countryCode = (article?.country || "").toLowerCase().trim();
+  const isUaeOrSa = countryCode === "ae" || countryCode === "uae" || countryCode === "sa";
+  const isIndiaOrGlobal = countryCode === "in" || countryCode === "india" || countryCode === "global" || !countryCode;
+
+  const relevantLanguages = useMemo(() => {
+    if (isUaeOrSa) {
+      return SUPPORTED_LANGUAGES.filter((l) => l.code === "en" || l.code === "ar");
+    }
+    if (isIndiaOrGlobal) {
+      return SUPPORTED_LANGUAGES.filter((l) => l.code !== "ar");
+    }
+    return SUPPORTED_LANGUAGES.filter((l) => l.code === "en");
+  }, [isUaeOrSa, isIndiaOrGlobal]);
+
   const availableLangs = useMemo(() => {
     const langs = ["en"];
     Object.keys(translations).forEach((k) => {
@@ -137,7 +155,10 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
     if (!article) return "";
     const base = process.env.NEXT_PUBLIC_VINIMAY_URL || "https://vinimay.sharda.co.in";
     const catSlug = article.categorySlug || "getting-started";
-    return `${base}/knowledge-base/${catSlug}/${article.slug}`;
+    const isDefaultRoot = !article.country || article.country === "global" || article.country === "in";
+    return isDefaultRoot
+      ? `${base}/knowledge-base/${catSlug}/${article.slug}`
+      : `${base}/${article.country}/knowledge-base/${catSlug}/${article.slug}`;
   }, [article]);
 
   // YouTube embed
@@ -509,6 +530,21 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                   <span>{currentCategory?.name || article.categoryName}</span>
                 </Badge>
 
+                {/* Country Badge */}
+                {(() => {
+                  const c = getCountry(article.country || "global");
+                  return (
+                    <Badge
+                      variant="outline"
+                      className="text-[11px] font-medium gap-1.5 bg-muted/60 text-foreground border-border/80"
+                      title={`Target Country: ${c.name}`}
+                    >
+                      <CountryFlag code={c.code} size={15} />
+                      <span>{c.code === "global" ? "Global" : c.name}</span>
+                    </Badge>
+                  );
+                })()}
+
                 {/* Category Order Rank */}
                 <Badge variant="secondary" className="text-[11px] font-medium text-muted-foreground">
                   Order #{article.order || 1}
@@ -549,7 +585,7 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
 
               {/* Subtitle / Slug */}
               <p className="text-xs font-mono text-muted-foreground truncate">
-                /{article.categorySlug}/{article.slug}
+                {article.country && article.country !== "global" && article.country !== "in" ? `/${article.country}` : ""}/{article.categorySlug}/{article.slug}
               </p>
 
               {/* Metadata Info Row */}
@@ -801,13 +837,13 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                 >
                   <Globe className="w-3.5 h-3.5 mr-1.5 text-violet-600" />
                   <span>
-                    {SUPPORTED_LANGUAGES.find((l) => l.code === previewLang)?.label || "English"}
+                    {relevantLanguages.find((l) => l.code === previewLang)?.label || "English"}
                   </span>
                   <ChevronDown className="w-3 h-3 ml-1.5 text-violet-400" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52 p-1">
-                {SUPPORTED_LANGUAGES.map((lang) => {
+                {relevantLanguages.map((lang) => {
                   const isAvailable = availableLangs.includes(lang.code);
                   const isSelected = previewLang === lang.code;
                   return (
@@ -1545,6 +1581,8 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
       {lightboxImg && (
         <Dialog open={Boolean(lightboxImg)} onOpenChange={() => setLightboxImg(null)}>
           <DialogContent className="max-w-4xl p-2 bg-black/95 border-neutral-800 text-white">
+            <DialogTitle className="sr-only">Image Preview</DialogTitle>
+            <DialogDescription className="sr-only">Full size preview of article image</DialogDescription>
             <div className="p-2 space-y-2">
               <img
                 src={lightboxImg.src}

@@ -46,6 +46,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog, Labeled } from "../bits";
 import { api, fetcher, initials } from "@/lib/client";
 import { useTheme } from "next-themes";
+import { toast } from "sonner";
 
 export default function SettingsView({
   tab: initialTab,
