@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { HelpCircle, Plus, Trash2 } from "lucide-react";
+import { HelpCircle, Plus, Trash2, FileText, } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -312,8 +312,33 @@ export default function FaqEditorCard({
             <div className="text-center py-6 text-xs text-muted-foreground border border-dashed border-border rounded-xl">
               {emptyMessage}
             </div>
-          )}
+          )}   
         </CardContent>
+        <div className="flex gap-4 justify-end px-6 pb-5">
+          <Button
+      type="button"
+    variant="outline"
+    size="icon"
+    onClick={handleAddFaq}
+    className="h-10 w-10 rounded-full border-border bg-background text-foreground shadow-sm hover:border-foreground hover:bg-muted"
+    aria-label="Add FAQ"
+    title="Add FAQ"
+  >
+    <Plus className="h-5 w-5" />
+  </Button>
+
+   <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={openImportDialog}
+              className="h-10 w-10 rounded-full border-border bg-background text-foreground shadow-sm hover:border-foreground hover:bg-muted"
+               aria-label="import FAQ"
+               title="import FAQ"
+            >
+              <FileText  />
+            </Button>
+</div>
       </Card>
 
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
