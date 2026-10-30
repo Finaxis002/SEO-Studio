@@ -117,10 +117,10 @@ const ArticleEditor = dynamic(
   () => import("@/components/views/ArticleEditor"),
   { ssr: false, loading: ViewLoading },
 );
-const KbDetail = dynamic(
-  () => import("@/components/views/KbDetail"),
-  { ssr: false, loading: ViewLoading },
-);
+const KbDetail = dynamic(() => import("@/components/views/KbDetail"), {
+  ssr: false,
+  loading: ViewLoading,
+});
 const KbCategoriesView = dynamic(
   () => import("@/components/views/KbCategoriesView"),
   { ssr: false, loading: ViewLoading },
@@ -217,8 +217,7 @@ export default function App() {
     (perm) => {
       const perms = role?.permissions || user?.permissions || [];
       return (
-        Array.isArray(perms) &&
-        (perms.includes("*") || perms.includes(perm))
+        Array.isArray(perms) && (perms.includes("*") || perms.includes(perm))
       );
     },
     [role, user?.permissions],
@@ -435,12 +434,17 @@ export default function App() {
           );
         return <Keywords navigate={navigate} can={can} />;
       case "analytics":
-        if (!can("analytics.view"))
+        if (!can("analytics.view") && !can("kb.view"))
           return accessDenied(
             "Your role does not have permission to view analytics.",
           );
         return (
-          <AnalyticsView initialTab={p.tab} key={p.tab} navigate={navigate} />
+          <AnalyticsView
+            initialTab={p.tab}
+            initialIndexType={p.indexType}
+            key={(p.tab || "overview") + "_" + (p.indexType || "")}
+            navigate={navigate}
+          />
         );
       case "team":
         if (!can("team.view"))
@@ -517,11 +521,7 @@ export default function App() {
         "Your role does not have permission to create Knowledge Base guides.",
       );
     }
-    if (
-      !isNew &&
-      !can("kb.edit") &&
-      !can("kb.view")
-    ) {
+    if (!isNew && !can("kb.edit") && !can("kb.view")) {
       return accessDenied(
         "Your role does not have permission to edit or view this guide.",
       );

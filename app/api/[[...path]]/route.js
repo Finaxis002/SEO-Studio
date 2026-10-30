@@ -3909,6 +3909,7 @@ async function handleRoute(request, { params }) {
                 id: 1,
                 title: 1,
                 slug: 1,
+                country: 1,
                 categorySlug: 1,
                 categoryName: 1,
                 featuredImage: 1,
@@ -3917,8 +3918,7 @@ async function handleRoute(request, { params }) {
               },
             },
           )
-          .sort({ order: 1, publishedAt: -1, updatedAt: -1 })
-          .allowDiskUse(true)
+          .sort({ publishedAt: -1, updatedAt: -1 })
           .toArray();
 
         const result = await getGoogleIndexing(articles, "kb");
@@ -3934,6 +3934,7 @@ async function handleRoute(request, { params }) {
               id: 1,
               title: 1,
               slug: 1,
+              country: 1,
               featuredImage: 1,
               publishedAt: 1,
               updatedAt: 1,

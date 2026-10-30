@@ -185,7 +185,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
         label: "View on Vinimay",
         icon: ExternalLink,
         show: isPub && !!b.slug,
-        onClick: () => window.open(getVinimayBlogUrl(b.slug), "_blank"),
+        onClick: () => window.open(getVinimayBlogUrl(b.slug, null, b.country), "_blank"),
       },
       {
         label: "Edit",
@@ -311,7 +311,7 @@ export default function Blogs({ statusFilter, navigate, can }) {
                 action: {
                   label: "View on Vinimay ↗",
                   onClick: () =>
-                    window.open(getVinimayBlogUrl(b.slug), "_blank"),
+                    window.open(getVinimayBlogUrl(b.slug, null, b.country), "_blank"),
                 },
                 duration: 9000,
               });
