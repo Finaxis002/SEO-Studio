@@ -881,7 +881,13 @@ const categoriesById = useMemo(() => {
                                     const vinimayUrl =
                                       process.env.NEXT_PUBLIC_VINIMAY_URL ||
                                       "https://vinimay.sharda.co.in";
-                                    const fullUrl = `${vinimayUrl}/knowledge-base/${art.categorySlug}/${art.slug}`;
+                                    const countryPrefix =
+                                      art.country &&
+                                      art.country !== "global" &&
+                                      art.country !== "in"
+                                        ? `/${art.country}`
+                                        : "";
+                                    const fullUrl = `${vinimayUrl}${countryPrefix}/knowledge-base/${art.categorySlug || "guide"}/${art.slug}`;
                                     window.open(fullUrl, "_blank");
                                   }}
                                   className="cursor-pointer"

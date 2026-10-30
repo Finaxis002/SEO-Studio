@@ -148,6 +148,16 @@ export const NAV = [
         icon: FolderOpen,
         perm: ["kb.categories", "kb.view"],
       },
+      {
+        key: "analytics",
+        label: "KB Indexing",
+        icon: Globe,
+        perm: ["analytics.view", "kb.view"],
+        params: {
+          tab: "indexing",
+          indexType: "kb",
+        },
+      },
     ],
   },
   {
@@ -293,16 +303,27 @@ export function navTitle(view) {
     return "Knowledge Base Categories";
   }
 
+  // 1. Try exact match including params
   for (const g of NAV) {
     for (const it of g.items) {
-      const sameView = (it.view ? it.view.name : it.key) === view.name;
+      const target = it.view ? it.view.name : it.key;
+      if (target !== view.name) continue;
 
-      const sameParams =
-        !it.params ||
-        (view.params &&
-          Object.entries(it.params).every(([k, v]) => view.params[k] === v));
+      if (it.params && view.params) {
+        if (Object.entries(it.params).every(([k, v]) => view.params[k] === v)) {
+          return it.label;
+        }
+      } else if (!it.params && (!view.params || !Object.keys(view.params).length)) {
+        return it.label;
+      }
+    }
+  }
 
-      if (sameView && sameParams) {
+  // 2. Fallback match by view.name only
+  for (const g of NAV) {
+    for (const it of g.items) {
+      const target = it.view ? it.view.name : it.key;
+      if (target === view.name) {
         return it.label;
       }
     }

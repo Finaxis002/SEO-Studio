@@ -48,12 +48,12 @@ const RANGES = [
   { v: "365", l: "1 Year" },
 ];
 
-export default function AnalyticsView({ initialTab, navigate }) {
+export default function AnalyticsView({ initialTab, initialIndexType, navigate }) {
   const [range, setRange] = useState("30");
   const [tab, setTab] = useState(initialTab || "overview");
   const [indexSearch, setIndexSearch] = useState("");
   const [indexFilter, setIndexFilter] = useState("all");
-  const [indexType, setIndexType] = useState("blogs"); // "blogs" | "kb"
+  const [indexType, setIndexType] = useState(initialIndexType || "blogs"); // "blogs" | "kb"
   const [indexPage, setIndexPage] = useState(1);
   const [indexLimit, setIndexLimit] = useState(25);
   const { data, error } = useSWR("/api/analytics?range=" + range, fetcher);
@@ -146,9 +146,19 @@ export default function AnalyticsView({ initialTab, navigate }) {
     <div className="space-y-4 animate-fade-up">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-[22px] font-bold tracking-tight">Analytics</h1>
+          <h1 className="text-[22px] font-bold tracking-tight">
+            {tab === "indexing"
+              ? indexType === "kb"
+                ? "Knowledge Base Indexing"
+                : "Blogs Google Indexing"
+              : "Analytics"}
+          </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Content performance across the last {range} days.
+            {tab === "indexing"
+              ? indexType === "kb"
+                ? "Live crawl and indexation status of Knowledge Base guides via Google Search Console."
+                : "Live crawl and indexation status of published blogs via Google Search Console."
+              : `Content performance across the last ${range} days.`}
           </p>
         </div>
         <Tabs value={tab} onValueChange={setTab}>
