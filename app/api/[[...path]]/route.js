@@ -1085,7 +1085,11 @@ async function handleRoute(request, { params }) {
       const slugOrId = decodeURIComponent(path[2]);
       const blog = await db.collection("blogs").findOne({
         status: "published",
-        $or: [{ slug: slugOrId }, { id: slugOrId }],
+        $or: [
+          { slug: slugOrId },
+          { id: slugOrId },
+          { previousSlugs: slugOrId },
+        ],
       });
 
       if (!blog) {
@@ -2354,6 +2358,12 @@ async function handleRoute(request, { params }) {
                 },
                 { status: 409 },
               ),
+            );
+          }
+          if (existing.slug) {
+            await db.collection("blogs").updateOne(
+              { id },
+              { $addToSet: { previousSlugs: existing.slug } }
             );
           }
         }
