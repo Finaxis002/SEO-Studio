@@ -1083,14 +1083,66 @@ async function handleRoute(request, { params }) {
   ) {
     try {
       const slugOrId = decodeURIComponent(path[2]);
-      const blog = await db.collection("blogs").findOne({
-        status: "published",
-        $or: [
-          { slug: slugOrId },
-          { id: slugOrId },
-          { previousSlugs: slugOrId },
-        ],
-      });
+      const sp = new URL(request.url).searchParams;
+      const reqLang = (sp.get("lang") || "en").toLowerCase().trim();
+
+      // Lean projection: avoids downloading 350KB+ of unused translations on every hit
+      const projection = {
+        title: 1,
+        slug: 1,
+        id: 1,
+        contentHtml: 1,
+        excerpt: 1,
+        category: 1,
+        tags: 1,
+        featuredImage: 1,
+        publishedAt: 1,
+        updatedAt: 1,
+        createdAt: 1,
+        author: 1,
+        seo: 1,
+        country: 1,
+        faqs: 1,
+        readingTime: 1,
+        wordCount: 1,
+        previousSlugs: 1,
+        status: 1,
+        "translations.mr.title": 1,
+        "translations.hi.title": 1,
+        "translations.ta.title": 1,
+        "translations.gu.title": 1,
+        "translations.kn.title": 1,
+        "translations.te.title": 1,
+        "translations.bn.title": 1,
+        "translations.ar.title": 1,
+      };
+      const allTrans = sp.get("allTranslations") === "true";
+      if (allTrans) {
+        delete projection["translations.mr.title"];
+        delete projection["translations.hi.title"];
+        delete projection["translations.ta.title"];
+        delete projection["translations.gu.title"];
+        delete projection["translations.kn.title"];
+        delete projection["translations.te.title"];
+        delete projection["translations.bn.title"];
+        delete projection["translations.ar.title"];
+        projection.translations = 1;
+      } else if (reqLang && reqLang !== "en") {
+        delete projection[`translations.${reqLang}.title`];
+        projection[`translations.${reqLang}`] = 1;
+      }
+
+      const blog = await db.collection("blogs").findOne(
+        {
+          status: "published",
+          $or: [
+            { slug: slugOrId },
+            { id: slugOrId },
+            { previousSlugs: slugOrId },
+          ],
+        },
+        { projection }
+      );
 
       if (!blog) {
         return handleCORS(
