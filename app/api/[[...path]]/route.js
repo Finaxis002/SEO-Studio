@@ -1107,30 +1107,8 @@ async function handleRoute(request, { params }) {
         wordCount: 1,
         previousSlugs: 1,
         status: 1,
-        "translations.mr.title": 1,
-        "translations.hi.title": 1,
-        "translations.ta.title": 1,
-        "translations.gu.title": 1,
-        "translations.kn.title": 1,
-        "translations.te.title": 1,
-        "translations.bn.title": 1,
-        "translations.ar.title": 1,
+        translations: 1,
       };
-      const allTrans = sp.get("allTranslations") === "true";
-      if (allTrans) {
-        delete projection["translations.mr.title"];
-        delete projection["translations.hi.title"];
-        delete projection["translations.ta.title"];
-        delete projection["translations.gu.title"];
-        delete projection["translations.kn.title"];
-        delete projection["translations.te.title"];
-        delete projection["translations.bn.title"];
-        delete projection["translations.ar.title"];
-        projection.translations = 1;
-      } else if (reqLang && reqLang !== "en") {
-        delete projection[`translations.${reqLang}.title`];
-        projection[`translations.${reqLang}`] = 1;
-      }
 
       const blog = await db.collection("blogs").findOne(
         {

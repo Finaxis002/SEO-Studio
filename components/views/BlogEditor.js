@@ -2641,7 +2641,7 @@ export default function BlogEditor({
                     className="text-[11px] font-medium gap-1 bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300"
                   >
                     <Globe className="h-3 w-3" />{" "}
-                    {Object.keys(form.translations).length + 1} Languages Live
+                    {new Set(["en", ...Object.keys(form.translations)]).size} Languages Live
                   </Badge>
                 )}
               {form.status === "scheduled" && form.scheduledAt && (
