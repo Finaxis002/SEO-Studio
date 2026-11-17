@@ -55,6 +55,7 @@ import {
   getImageThumbnailUrl,
 } from "@/lib/client";
 import { getCountry } from "@/lib/countries";
+import { getLanguagesForCountry } from "@/lib/country-languages";
 import { CountryFlag } from "./CountrySelector";
 import { analyzeSeo } from "@/lib/seo";
 import {
@@ -111,22 +112,17 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
   const [previewLang, setPreviewLang] = useState("en");
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
 
-  const countryCode = (b?.country || "").toLowerCase().trim();
-  const isUaeOrSa = countryCode === "ae" || countryCode === "uae" || countryCode === "sa";
-  const isIndiaOrGlobal = countryCode === "in" || countryCode === "india" || countryCode === "global" || !countryCode;
-
   const relevantBlogLanguages = useMemo(() => {
-    if (isUaeOrSa) {
-      return ALL_BLOG_LANGUAGES.filter((l) => l.code === "en" || l.code === "ar");
-    }
-    if (isIndiaOrGlobal) {
-      return ALL_BLOG_LANGUAGES.filter((l) => l.code !== "ar");
-    }
-    return ALL_BLOG_LANGUAGES.filter((l) => l.code === "en");
-  }, [isUaeOrSa, isIndiaOrGlobal]);
+    const list = getLanguagesForCountry(b?.country);
+    return list.map((l) => ({
+      code: l.code,
+      label: l.label,
+      sub: l.nativeName || l.label,
+    }));
+  }, [b?.country]);
 
   const displayFaqs = useMemo(() => {
-    if (previewLang !== "en" && b?.translations?.[previewLang]?.faqs?.length) {
+    if (b?.translations?.[previewLang]?.faqs?.length) {
       return b.translations[previewLang].faqs;
     }
     return b?.faqs || [];
@@ -300,7 +296,7 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
                   className="text-[11px] font-medium gap-1 bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300"
                 >
                   <Globe className="h-3 w-3" />{" "}
-                  {Object.keys(b.translations).length + 1} Languages Live
+                  {new Set(["en", ...Object.keys(b.translations)]).size} Languages Live
                 </Badge>
               )}
               {b.status === "published" && thisBlogIndex && (
@@ -874,7 +870,7 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
         <TabsContent value="content" className="mt-4">
           <Card>
             <CardContent className="p-6 lg:p-8">
-              {previewLang !== "en" && b.translations?.[previewLang]?.title && (
+              {b.translations?.[previewLang]?.title && (
                 <div className="mb-6 pb-3 border-b border-muted">
                   <h2 className="text-xl font-bold tracking-tight text-foreground">
                     {b.translations[previewLang].title}
@@ -892,10 +888,7 @@ export default function BlogDetail({ blogId, returnView, navigate, can }) {
                   className="prose-studio max-w-3xl"
                   dangerouslySetInnerHTML={{
                     __html:
-                      previewLang !== "en" &&
-                      b.translations?.[previewLang]?.contentHtml
-                        ? b.translations[previewLang].contentHtml
-                        : b.contentHtml,
+                      b.translations?.[previewLang]?.contentHtml || b.contentHtml,
                   }}
                   onClick={(e) => {
                     const a = e.target.closest("a");

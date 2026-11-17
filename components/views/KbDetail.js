@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/dialog";
 import { api, fetcher, fmtDate, timeAgo, initials, getVinimayUrl } from "@/lib/client";
 import { getCountry } from "@/lib/countries";
+import { getLanguagesForCountry } from "@/lib/country-languages";
 import { CountryFlag } from "./CountrySelector";
 import { ScheduleDialog } from "../bits";
 import CategoryIcon from "./CategoryIcon";
@@ -114,33 +115,32 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
 
   // Translations
   const translations = article?.translations || {};
-  const countryCode = (article?.country || "").toLowerCase().trim();
-  const isUaeOrSa = countryCode === "ae" || countryCode === "uae" || countryCode === "sa";
-  const isIndiaOrGlobal = countryCode === "in" || countryCode === "india" || countryCode === "global" || !countryCode;
-
   const relevantLanguages = useMemo(() => {
-    if (isUaeOrSa) {
-      return SUPPORTED_LANGUAGES.filter((l) => l.code === "en" || l.code === "ar");
-    }
-    if (isIndiaOrGlobal) {
-      return SUPPORTED_LANGUAGES.filter((l) => l.code !== "ar");
-    }
-    return SUPPORTED_LANGUAGES.filter((l) => l.code === "en");
-  }, [isUaeOrSa, isIndiaOrGlobal]);
+    const list = getLanguagesForCountry(article?.country);
+    return list.map((l) => ({
+      code: l.code,
+      label: `${l.label} (${l.nativeName || l.label})`,
+      flag: l.code === "en" ? "🌐" : "🌐",
+    }));
+  }, [article?.country]);
 
   const availableLangs = useMemo(() => {
-    const langs = ["en"];
+    const langs = new Set(["en"]);
     Object.keys(translations).forEach((k) => {
-      if (translations[k]?.title || translations[k]?.contentHtml) {
-        langs.push(k);
+      if (
+        translations[k]?.title ||
+        translations[k]?.contentHtml ||
+        translations[k]?.overview ||
+        translations[k]?.steps
+      ) {
+        langs.add(k);
       }
     });
-    return langs;
+    return Array.from(langs);
   }, [translations]);
 
-  // Active translation preview data
   const activeTranslation =
-    previewLang !== "en" && translations[previewLang]
+    translations[previewLang]
       ? translations[previewLang]
       : null;
 
