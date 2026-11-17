@@ -4003,7 +4003,7 @@ async function handleRoute(request, { params }) {
 
       // Use lean projection — seoAudit stores pre-computed hasHeading/missingAlt/hasInternalLinks
       // so we don't need to fetch 8MB+ of contentHtml on every request.
-      const [blogs, allSlugs, media] = await Promise.all([
+      const [blogs, allSlugs, allPrevSlugs, media] = await Promise.all([
         db
           .collection("blogs")
           .find(
@@ -4020,6 +4020,7 @@ async function handleRoute(request, { params }) {
           )
           .toArray(),
         db.collection("blogs").distinct("slug"),
+        db.collection("blogs").distinct("previousSlugs"),
         db
           .collection("media")
           .find({}, { projection: { id: 1, name: 1, size: 1 } })
@@ -4027,7 +4028,9 @@ async function handleRoute(request, { params }) {
       ]);
 
       const slugSet = new Set(
-        allSlugs.map((s) => (s || "").toLowerCase().trim()).filter(Boolean),
+        [...allSlugs, ...(allPrevSlugs || []).flat()]
+          .map((s) => (s || "").toLowerCase().trim())
+          .filter(Boolean),
       );
       const issues = [];
       const sanitizeAffected = (arr) =>
