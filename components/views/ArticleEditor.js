@@ -1952,7 +1952,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
       if (wrapper) {
         wrapper.remove();
         if (editorRef.current) {
-          setForm((prev) => ({ ...prev, contentHtml: editorRef.current.innerHTML }));
+          setForm((prev) => ({ ...prev, videoUrl: "", contentHtml: editorRef.current.innerHTML }));
         }
         toast.success("Video removed from content");
       }
@@ -2179,7 +2179,7 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
     videoBar.wrapper.remove();
     setVideoBar(null);
     if (editorRef.current) {
-      setForm((prev) => ({ ...prev, contentHtml: editorRef.current.innerHTML }));
+      setForm((prev) => ({ ...prev, videoUrl: "", contentHtml: editorRef.current.innerHTML }));
     }
     toast.success("Video removed from content");
   };
@@ -2360,9 +2360,9 @@ export default function ArticleEditor({ articleId = "new", navigate, can, user }
       const firstPara = currentHtml.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
       if (firstPara) autoOverview = firstPara[1].replace(/<[^>]*>/g, "").trim();
     }
-    // Auto extract video URL if iframe embedded in editor
-    let autoVideoUrl = form.videoUrl?.trim() || "";
-    if (!autoVideoUrl && currentHtml) {
+    // Auto extract video URL if iframe embedded in editor, or clear it if video was deleted from content
+    let autoVideoUrl = "";
+    if (currentHtml) {
       const iframeMatch = currentHtml.match(/<iframe[^>]*src=["']([^"']*)["']/i);
       if (iframeMatch && iframeMatch[1]) {
         autoVideoUrl = iframeMatch[1];

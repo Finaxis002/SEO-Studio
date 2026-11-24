@@ -98,6 +98,25 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
   const [lightboxImg, setLightboxImg] = useState(null);
   const [activeSection, setActiveSection] = useState("overview");
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [removingVideo, setRemovingVideo] = useState(false);
+
+  const handleRemoveVideo = async () => {
+    if (!article?.id) return;
+    if (!window.confirm("Are you sure you want to remove this video walkthrough from this guide?")) return;
+    setRemovingVideo(true);
+    try {
+      await api.put(`/kb/articles/${article.id}`, { videoUrl: "" });
+      toast.success("Video walkthrough removed successfully!");
+      if (data) {
+        mutate({ ...data, article: { ...article, videoUrl: "" } }, false);
+      }
+      mutate();
+    } catch (err) {
+      toast.error("Failed to remove video: " + (err?.message || "Unknown error"));
+    } finally {
+      setRemovingVideo(false);
+    }
+  };
 
   // Fetch article data
   const { data, error, mutate } = useSWR(
@@ -1021,11 +1040,26 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
                   {/* 5. Embedded Video Walkthrough (if attached and not already in editor content) */}
                   {embedVideoUrl && !hasContentVideo && (
                     <section id="video" className="scroll-mt-28 space-y-3 pt-4 border-t border-border/50">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                        <div className="w-6 h-6 rounded-md bg-red-100 text-red-600 flex items-center justify-center">
-                          <Video className="w-3.5 h-3.5" />
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                          <div className="w-6 h-6 rounded-md bg-red-100 text-red-600 flex items-center justify-center">
+                            <Video className="w-3.5 h-3.5" />
+                          </div>
+                          <span>Video Walkthrough</span>
                         </div>
-                        <span>Video Walkthrough</span>
+                        {can("kb.edit") && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleRemoveVideo}
+                            disabled={removingVideo}
+                            className="h-7 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                            title="Remove this video walkthrough from guide"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 mr-1" />
+                            Remove Video
+                          </Button>
+                        )}
                       </div>
                       <div className="relative aspect-video w-full rounded-2xl overflow-hidden border border-border shadow-xs bg-black">
                         <iframe
@@ -1475,14 +1509,25 @@ export default function KbDetail({ articleId, returnView, navigate, can }) {
 
                     <div className="flex items-center gap-2">
                       {can("kb.edit") && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => navigate("kb-editor", { articleId: article.id })}
-                          className="h-8 text-xs hover:border-[#7552da]/40 hover:text-[#7552da]"
-                        >
-                          <Pencil className="w-3.5 h-3.5 mr-1.5" /> Edit Video Link
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => navigate("kb-editor", { articleId: article.id })}
+                            className="h-8 text-xs hover:border-[#7552da]/40 hover:text-[#7552da]"
+                          >
+                            <Pencil className="w-3.5 h-3.5 mr-1.5" /> Edit Video Link
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleRemoveVideo}
+                            disabled={removingVideo}
+                            className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 border-red-200 dark:border-red-900/50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Remove Video
+                          </Button>
+                        </>
                       )}
                       <Button
                         size="sm"
